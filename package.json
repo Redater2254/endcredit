@@ -1,0 +1,48 @@
+{
+  "name": "endcredit",
+  "version": "0.1.0",
+  "description": "SOOP 스트리머용 커스텀 엔딩크레딧 제작·송출 앱",
+  "main": "./out/main/index.js",
+  "author": {
+    "name": "나태한유신",
+    "url": "https://github.com/Redater2254"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "verify": "esbuild scripts/verify-aggregate.ts --bundle --platform=node --format=esm --outfile=out/verify.mjs --log-level=warning && node out/verify.mjs",
+    "icons": "electron scripts/make-icons.js",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs --win",
+    "dist:nokey": "node scripts/dist-nokey.js",
+    "pack": "npm run build && electron-builder --config electron-builder.config.cjs --win --dir",
+    "bake": "node scripts/bake-credentials.js",
+    "predev": "node scripts/bake-credentials.js",
+    "prebuild": "node scripts/bake-credentials.js"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^7.3.6"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Redater2254/endcredit.git"
+  },
+  "homepage": "https://github.com/Redater2254/endcredit",
+  "license": "MIT"
+}

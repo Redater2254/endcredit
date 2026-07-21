@@ -1,0 +1,23 @@
+# 절대 커밋 금지 — SOOP Client Secret
+my-api-key.txt
+credentials.json
+.env
+.env.*
+
+node_modules/
+out/
+dist/
+userData/
+*.log
+.DS_Store
+DESIGN.md
+
+# 브랜드 원본 (PSD·고해상도 원본은 저장소에 두지 않는다)
+brand/*.psd
+
+# 빌드 산출물
+*.tsbuildinfo
+build/icons/
+
+# 빌드할 때 만들어지는 자격증명 (절대 커밋 금지)
+src/main/credentials-baked.ts
