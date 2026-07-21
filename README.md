@@ -10,6 +10,7 @@
 채팅 순위 · 별풍선 · 신규 구독자 같은 **오늘의 실제 기록**을 자동으로 모아서 화면에 띄웁니다.
 
 `Windows` · `Electron` · `SOOP OpenAPI`
+<img width="1920" height="1080" alt="inui" src="https://github.com/user-attachments/assets/e89aa15a-4345-43c2-8a43-f65ea73b06af" />
 
 </div>
 
