@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { EFFECTS, getEffect } from '@shared/effects'
+import { allEffects, getEffect } from '@shared/effects'
+import { isCustomId } from '@shared/custom-effect'
 import {
   appearOrderOf,
   backgroundOf,
@@ -69,19 +70,42 @@ function FolderIcon(): React.JSX.Element {
   )
 }
 
-/** 등장·퇴장을 **따로** 고르게 한다. 한 목록에 섞으면 둘을 함께 쓸 수가 없다. */
-const ENTRANCE_OPTIONS = [
-  { value: 'none', label: '없음' },
-  ...EFFECTS.filter((e) => e.id !== 'none' && e.category === 'in').map((e) => ({
-    value: e.id,
-    label: e.name
-  }))
-]
+/**
+ * 등장·퇴장을 **따로** 고르게 한다. 한 목록에 섞으면 둘을 함께 쓸 수가 없다.
+ *
+ * 내가 만든 효과가 목록에 들어와야 하므로 상수가 아니라 함수다 —
+ * 문서를 열 때마다 목록이 달라진다.
+ */
+function entranceOptions(): { value: string; label: string }[] {
+  return [
+    { value: 'none', label: '없음' },
+    ...byCategory('in').map((e) => ({ value: e.id, label: label(e) }))
+  ]
+}
 
-const EXIT_OPTIONS = [
-  { value: '', label: '없음 (그대로 사라짐)' },
-  ...EFFECTS.filter((e) => e.category === 'out').map((e) => ({ value: e.id, label: e.name }))
-]
+function exitOptions(): { value: string; label: string }[] {
+  return [
+    { value: '', label: '없음 (그대로 사라짐)' },
+    ...byCategory('out').map((e) => ({ value: e.id, label: label(e) }))
+  ]
+}
+
+function emphasisOptions(): { value: string; label: string }[] {
+  return [
+    { value: '', label: '없음' },
+    ...byCategory('emphasis').map((e) => ({ value: e.id, label: label(e) }))
+  ]
+}
+
+/** 내가 만든 것을 앞에 세우고 표시를 붙인다 — 기본 44종에 섞이면 찾을 수 없다 */
+function byCategory(c: 'in' | 'out' | 'emphasis'): { id: string; name: string }[] {
+  const all = allEffects().filter((e) => e.category === c && e.id !== 'none')
+  return [...all.filter((e) => isCustomId(e.id)), ...all.filter((e) => !isCustomId(e.id))]
+}
+
+function label(e: { id: string; name: string }): string {
+  return isCustomId(e.id) ? `✎ ${e.name}` : e.name
+}
 
 const KIND_ICON: Record<string, string> = {
   text: 'T',
@@ -581,14 +605,14 @@ function MultiProps({
             <Select
               value={mo.preset}
               onChange={(p) => onPatch({ motion: { ...mo, preset: p } })}
-              options={ENTRANCE_OPTIONS}
+              options={entranceOptions()}
             />
           </Field>
           <Field label="퇴장 효과" hint="장이 끝나기 직전">
             <Select
               value={mo.exit ?? ''}
               onChange={(v) => onPatch({ motion: { ...mo, exit: v === '' ? null : v } })}
-              options={EXIT_OPTIONS}
+              options={exitOptions()}
             />
           </Field>
           <Field label="효과 속도">
@@ -615,13 +639,7 @@ function MultiProps({
             <Select
               value={mo.loop ?? ''}
               onChange={(v) => onPatch({ motion: { ...mo, loop: v === '' ? null : v } })}
-              options={[
-                { value: '', label: '없음' },
-                ...EFFECTS.filter((e) => e.category === 'emphasis').map((e) => ({
-                  value: e.id,
-                  label: e.name
-                }))
-              ]}
+              options={emphasisOptions()}
             />
           </Field>
         </>
@@ -659,14 +677,14 @@ function GroupMotionFields({
         <Select
           value={m.preset}
           onChange={(preset) => set({ preset })}
-          options={ENTRANCE_OPTIONS}
+          options={entranceOptions()}
         />
       </Field>
       <Field label="묶음 퇴장 효과">
         <Select
           value={m.exit ?? ''}
           onChange={(v) => set({ exit: v === '' ? null : v })}
-          options={EXIT_OPTIONS}
+          options={exitOptions()}
         />
       </Field>
       {on && (
@@ -685,13 +703,7 @@ function GroupMotionFields({
             <Select
               value={m.loop ?? ''}
               onChange={(v) => set({ loop: v === '' ? null : v })}
-              options={[
-                { value: '', label: '없음' },
-                ...EFFECTS.filter((e) => e.category === 'emphasis').map((e) => ({
-                  value: e.id,
-                  label: e.name
-                }))
-              ]}
+              options={emphasisOptions()}
             />
           </Field>
         </>
@@ -886,7 +898,7 @@ function ElementProps({
         <Select
           value={mo.preset}
           onChange={(p) => onPatch({ motion: { ...mo, preset: p } })}
-          options={ENTRANCE_OPTIONS}
+          options={entranceOptions()}
         />
       </Field>
       <Field label="등장 속도">
@@ -954,7 +966,7 @@ function ElementProps({
         <Select
           value={mo.exit ?? ''}
           onChange={(v) => onPatch({ motion: { ...mo, exit: v === '' ? null : v } })}
-          options={EXIT_OPTIONS}
+          options={exitOptions()}
         />
       </Field>
       {mo.exit && (
@@ -974,13 +986,7 @@ function ElementProps({
         <Select
           value={mo.loop ?? ''}
           onChange={(v) => onPatch({ motion: { ...mo, loop: v === '' ? null : v } })}
-          options={[
-            { value: '', label: '없음' },
-            ...EFFECTS.filter((e) => e.category === 'emphasis').map((e) => ({
-              value: e.id,
-              label: e.name
-            }))
-          ]}
+          options={emphasisOptions()}
         />
       </Field>
     </div>
@@ -1354,10 +1360,14 @@ function SlideProps({
           }
           options={[
             { value: 'none', label: '없음' },
-            ...EFFECTS.filter((e) => e.id !== 'none' && e.category !== 'emphasis').map((e) => ({
-              value: e.id,
-              label: e.category === 'out' ? `${e.name} (퇴장)` : e.name
-            }))
+            ...allEffects()
+              .filter((e) => e.id !== 'none' && e.category !== 'emphasis')
+              .map((e) => ({
+                value: e.id,
+                label:
+                  (isCustomId(e.id) ? '✎ ' : '') +
+                  (e.category === 'out' ? `${e.name} (퇴장)` : e.name)
+              }))
           ]}
         />
       </Field>

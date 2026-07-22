@@ -442,17 +442,49 @@ export const EFFECTS: Effect[] = [
 
 const BY_ID = new Map(EFFECTS.map((e) => [e.id, e]))
 
+/**
+ * 사용자가 만든 효과.
+ *
+ * 문서(프리셋)에 담기는 값이라 카탈로그처럼 코드에 박아둘 수 없다. 문서를 열 때
+ * 여기에 등록해두면 `getEffect` 한 곳만 거치는 나머지 코드(렌더러·속성 패널·라이브러리)는
+ * **기본 효과와 내가 만든 효과를 구별할 필요가 없다.**
+ *
+ * 창(렌더러 프로세스)마다 하나씩 있는 값이고, 앱과 OBS 오버레이는 서로 다른 창이라
+ * 각자 자기 문서로 채운다.
+ */
+let CUSTOM: Effect[] = []
+
+export function setCustomEffects(list: Effect[]): void {
+  CUSTOM = list
+}
+
+/** 기본 카탈로그 + 내가 만든 것 */
+export function allEffects(): Effect[] {
+  return [...EFFECTS, ...CUSTOM]
+}
+
 export function getEffect(id: string): Effect {
-  return BY_ID.get(id) ?? BY_ID.get('fade')!
+  return BY_ID.get(id) ?? CUSTOM.find((e) => e.id === id) ?? BY_ID.get('fade')!
+}
+
+/** 그 id 가 실제로 있는지. 없으면 페이드로 대체되므로 조용히 뒤바뀌는 걸 막을 때 쓴다 */
+export function effectExists(id: string): boolean {
+  return BY_ID.has(id) || CUSTOM.some((e) => e.id === id)
 }
 
 export function effectsByCategory(category: EffectCategory): Effect[] {
-  return EFFECTS.filter((e) => e.category === category)
+  return allEffects().filter((e) => e.category === category)
 }
 
-/** CSS 애니메이션 이름. 카탈로그 id 하나로 미리보기·송출이 같은 정의를 쓴다. */
+/**
+ * CSS 애니메이션 이름. 카탈로그 id 하나로 미리보기·송출이 같은 정의를 쓴다.
+ *
+ * 내가 만든 효과의 id 는 `custom:xxxx` 라서 그대로 쓰면 **콜론이 든 CSS 식별자**가 된다.
+ * 그런 이름은 문법 오류라 브라우저가 `@keyframes` 규칙을 통째로 버리고, 효과는 아무 말 없이
+ * 재생되지 않는다. 여기서 한 번만 걸러 두면 부르는 쪽은 신경 쓸 일이 없다.
+ */
 export function keyframeName(id: string): string {
-  return `ec-${id}`
+  return `ec-${id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 }
 
 /** 카탈로그 전체를 <style> 에 넣을 CSS 로 만든다. */

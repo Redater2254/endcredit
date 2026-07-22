@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { DeckRenderer, MOTION_KEYFRAMES } from '@shared/DeckRenderer'
 import { defaultDeck } from '@shared/deck'
+import { CustomEffectStyles } from '@shared/useCustomEffects'
 import { overlayStreamUrl, serverUrl } from '@shared/constants'
 import type { OverlayState } from '@shared/overlay'
 
@@ -45,10 +46,15 @@ function Overlay(): React.JSX.Element {
     )
   }
 
+  const deck = state.deck ?? defaultDeck()
+
   return (
     <>
+      {/* 문서에 담겨 온 "내가 만든 효과"를 여기서도 등록·주입한다.
+          이게 없으면 방송에서만 그 효과가 페이드로 바뀌어 나간다. */}
+      <CustomEffectStyles deck={deck} />
       <DeckRenderer
-        deck={state.deck ?? defaultDeck()}
+        deck={deck}
         data={state.data}
         playing={state.playing}
         generation={state.generation}

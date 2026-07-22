@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import {
+  allEffects,
   CATEGORY_LABEL,
-  EFFECTS,
   keyframeName,
   type Effect,
   type EffectCategory
 } from '@shared/effects'
+import { isCustomId } from '@shared/custom-effect'
 import { ScreenFxLayer, SCREEN_EFFECTS, type ScreenEffect } from '@shared/screen-fx'
 
 /**
@@ -29,7 +30,11 @@ export function EffectLibrary({
   onApply,
   onApplyScreen,
   targetName,
-  slideName
+  slideName,
+  onNewEffect,
+  onEditEffect,
+  /** 문서에 담긴 내가 만든 효과가 바뀌면 목록을 다시 만든다 */
+  customStamp
 }: {
   /** 클릭으로 적용할 때 (드래그는 각 섹션이 직접 받는다) */
   onApply: (effectId: string) => void
@@ -38,6 +43,9 @@ export function EffectLibrary({
   /** 클릭 시 어디에 적용되는지 사용자에게 알려준다 */
   targetName: string | null
   slideName: string
+  onNewEffect: (category: EffectCategory) => void
+  onEditEffect: (id: string) => void
+  customStamp: string
 }): React.JSX.Element {
   const [category, setCategory] = useState<Tab>('in')
   const [query, setQuery] = useState('')
@@ -50,10 +58,12 @@ export function EffectLibrary({
     if (category === 'screen') {
       return SCREEN_EFFECTS.filter((e) => match(e.name, e.description))
     }
-    return EFFECTS.filter(
+    // 내가 만든 것을 앞에 둔다 — 방금 만든 걸 44개 뒤에서 찾게 하면 안 된다
+    const all = allEffects().filter(
       (e) => e.category === category && e.id !== 'none' && match(e.name, e.description)
     )
-  }, [category, query])
+    return [...all.filter((e) => isCustomId(e.id)), ...all.filter((e) => !isCustomId(e.id))]
+  }, [category, query, customStamp])
 
   return (
     <section className="lib">
@@ -88,12 +98,27 @@ export function EffectLibrary({
       </header>
 
       <div className="lib-grid">
+        {/* 화면 효과는 입자 시뮬레이션이라 키프레임 편집기로 만들 수 없다 */}
+        {category !== 'screen' && (
+          <button className="tile tile-new" onClick={() => onNewEffect(category as EffectCategory)}>
+            <span className="tile-stage">
+              <span className="tile-plus">+</span>
+            </span>
+            <span className="tile-name">효과 만들기</span>
+            <span className="tile-desc">키프레임과 그래프로 직접</span>
+          </button>
+        )}
         {category === 'screen'
           ? (list as ScreenEffect[]).map((e) => (
               <ScreenTile key={e.id} effect={e} onApply={onApplyScreen} />
             ))
           : (list as Effect[]).map((e) => (
-              <EffectTile key={e.id} effect={e} onApply={onApply} />
+              <EffectTile
+                key={e.id}
+                effect={e}
+                onApply={onApply}
+                onEdit={isCustomId(e.id) ? () => onEditEffect(e.id) : undefined}
+              />
             ))}
         {list.length === 0 && <p className="mono">검색 결과가 없습니다.</p>}
       </div>
@@ -103,10 +128,13 @@ export function EffectLibrary({
 
 function EffectTile({
   effect,
-  onApply
+  onApply,
+  onEdit
 }: {
   effect: Effect
   onApply: (id: string) => void
+  /** 내가 만든 효과에만 있다 — 기본 44종은 고칠 수 없다 */
+  onEdit?: () => void
 }): React.JSX.Element {
   // 재생 횟수를 key 로 써서, 다시 올릴 때마다 애니메이션이 처음부터 돌게 한다
   const [play, setPlay] = useState(0)
@@ -136,6 +164,19 @@ function EffectTile({
         <span key={play} className="tile-demo" style={demoStyle}>
           Aa
         </span>
+        {onEdit && (
+          <span
+            className="tile-edit"
+            title="이 효과 고치기"
+            onClick={(ev) => {
+              // 타일 자체는 "적용"이다 — 연필까지 적용으로 삼키면 고칠 방법이 없다
+              ev.stopPropagation()
+              onEdit()
+            }}
+          >
+            ✎
+          </span>
+        )}
       </span>
       <span className="tile-name">{effect.name}</span>
       <span className="tile-desc">{effect.description}</span>

@@ -3,6 +3,9 @@ import { builtinAudioUrl } from './builtin-audio'
 import { DEFAULT_MOTION, exitDurationOf, type Motion, type SourceKind } from './preset'
 export { DEFAULT_MOTION }
 import { getScreenEffect, type ScreenFx } from './screen-fx'
+import type { CustomEffect } from './custom-effect'
+
+export type { CustomEffect }
 
 /** 이 화면 효과가 계속 반복되는지 (반복이면 장 길이에 영향을 주지 않는다) */
 function screenLoops(id: string): boolean {
@@ -292,7 +295,19 @@ export interface Deck {
   font: { family: string }
   /** 예전 문서에는 없다 — 읽을 때 audioOf() 로 기본값을 채운다 */
   audio?: DeckAudio
+  /**
+   * 사용자가 만든 효과.
+   *
+   * 문서에 함께 담기므로 `.ecpreset` 으로 내보내면 효과도 같이 딸려간다 —
+   * 받은 사람 화면에서도 똑같이 움직여야 프리셋을 주고받는 의미가 있다.
+   */
+  effects?: CustomEffect[]
   slides: Slide[]
+}
+
+/** 예전 문서에는 effects 가 없다. */
+export function effectsOf(deck: Deck): CustomEffect[] {
+  return deck.effects ?? []
 }
 
 /** 예전 문서에도 안전하게 소리 설정을 얻는다. */

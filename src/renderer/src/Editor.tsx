@@ -9,6 +9,7 @@ import {
   createText,
   deckDurationMs,
   DEFAULT_MOTION,
+  effectsOf,
   formatDuration,
   groupMotion,
   newId,
@@ -19,6 +20,7 @@ import {
   type Deck,
   type DeckAudio,
   type Frame,
+  type Motion,
   type Slide,
   type SlideElement,
   type SlideGroup
@@ -27,6 +29,9 @@ import { getEffect } from '@shared/effects'
 import { getScreenEffect, type ScreenFx } from '@shared/screen-fx'
 import type { OverlayInfo } from '@shared/overlay'
 import { EffectLibrary, SCREEN_FX_DRAG_TYPE } from './EffectLibrary'
+import { EffectEditor } from './EffectEditor'
+import { newCustomEffect, normalize, type CustomEffect } from '@shared/custom-effect'
+import { CustomEffectStyles } from '@shared/useCustomEffects'
 import { FieldPanel, FIELD_DRAG_TYPE } from './FieldPanel'
 import { SlidePanel } from './SlidePanel'
 import { Inspector } from './Inspector'
@@ -129,6 +134,17 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   /** 이 장만 재생해보는 미리보기 */
   /** 아래 서랍: 효과 / 데이터 */
   const [dock, setDock] = useState<'effects' | 'fields' | 'audio'>('effects')
+  /**
+   * 효과 편집기에서 만지는 중인 사본. `fresh` 면 아직 문서에 없는 새 효과다.
+   * 문서에 바로 쓰지 않는 이유는 saveEffect 주석 참고.
+   */
+  const [fxDraft, setFxDraft] = useState<{ fx: CustomEffect; fresh: boolean } | null>(null)
+  /**
+   * 만든 효과가 바뀌었음을 아래 목록들에 알리는 표식.
+   *
+   * 효과는 카탈로그(모듈 변수)에 등록되므로 리액트가 바뀐 걸 알아채지 못한다 —
+   * 이 문자열을 의존성에 끼워야 라이브러리와 속성 패널 목록이 다시 그려진다.
+   */
   const [previewGen, setPreviewGen] = useState(0)
   const [previewing, setPreviewing] = useState(false)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -297,6 +313,8 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   const cw = deck?.canvas.width ?? 1920
   const ch = deck?.canvas.height ?? 1080
   const slide = deck?.slides[slideIdx] ?? null
+  // 만든 효과의 id·이름·분류만 모은 표식 — 키프레임까지 넣으면 손잡이를 끌 때마다 바뀐다
+  const customStamp = (deck?.effects ?? []).map((f) => `${f.id}:${f.name}:${f.category}`).join('|')
   const ratio = slide ? slideHeightRatio(slide) : 1
 
   useLayoutEffect(() => {
@@ -1076,6 +1094,65 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     if (asset) patchElements([id], { src: asset.url } as Partial<SlideElement>)
   }
 
+  /**
+   * 효과 편집기를 **전용 창**으로 띄우고 결과를 기다린다.
+   *
+   * 덮개 상자로 두던 때는 키보드를 이 화면과 나눠 쓰게 되어 계속 부딪혔다 —
+   * `Ctrl+Z` 는 효과가 아니라 문서를 되돌렸고, `Space` 는 캔버스 손도구가 먼저 가로챘다.
+   * 창을 따로 띄우면 키가 통째로 그 창 것이 되고, 크레딧을 보면서 다듬을 수도 있다.
+   */
+  async function editEffect(fx: CustomEffect, fresh: boolean): Promise<void> {
+    const r = await window.endcredit.fx.open(fx, fresh)
+    if (r.action === 'save') saveEffect(r.effect)
+    else if (r.action === 'delete') deleteEffect(r.effect.id)
+  }
+
+  /**
+   * 만든 효과를 문서에 넣는다.
+   *
+   * 편집 중에는 창이 사본을 들고 있다가 저장할 때 한 번에 넘어온다 — 손잡이를 끄는 동안
+   * 매번 문서를 고치면 되돌리기 기록이 수백 줄로 불어나고, 취소가 뜻을 잃는다.
+   */
+  function saveEffect(fx: CustomEffect): void {
+    const list = effectsOf(deck!)
+    const at = list.findIndex((f) => f.id === fx.id)
+    const next = at >= 0 ? list.map((f) => (f.id === fx.id ? fx : f)) : [...list, fx]
+    update({ ...deck!, effects: next })
+    setFxDraft(null)
+  }
+
+  /**
+   * 효과를 지운다. 쓰고 있던 요소는 **효과 없음**으로 되돌린다 —
+   * 없는 id 를 남겨두면 재생할 때 조용히 페이드로 바뀌어, 왜 달라졌는지 알 수 없다.
+   */
+  function deleteEffect(id: string): void {
+    const clean = (m: Motion): Motion => ({
+      ...m,
+      preset: m.preset === id ? 'none' : m.preset,
+      loop: m.loop === id ? null : m.loop,
+      exit: m.exit === id ? null : m.exit
+    })
+    update({
+      ...deck!,
+      effects: effectsOf(deck!).filter((f) => f.id !== id),
+      slides: deck!.slides.map((s) => ({
+        ...s,
+        elements: s.elements.map((e) => ({ ...e, motion: clean(e.motion) })),
+        groups: s.groups
+          ? Object.fromEntries(
+              Object.entries(s.groups).map(([gid, g]) => [
+                gid,
+                g.motion ? { ...g, motion: clean(g.motion) } : g
+              ])
+            )
+          : s.groups,
+        transition:
+          s.transition?.preset === id ? { ...s.transition, preset: 'fade' } : s.transition
+      }))
+    })
+    setFxDraft(null)
+  }
+
   async function pickBackground(): Promise<void> {
     const asset = await window.endcredit.assets.pickImage()
     if (asset) patchSlide(slideIdx, { background: { ...slide!.background, image: asset.url } })
@@ -1546,6 +1623,9 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
 
       {dlg.node}
 
+      {/* 만든 효과의 키프레임 — 캔버스·썸네일·라이브러리 타일이 다 같은 정의를 쓴다 */}
+      <CustomEffectStyles deck={deck} />
+
       {help && <HelpModal onClose={() => setHelp(false)} />}
 
       {gallery && (
@@ -1595,6 +1675,13 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
             slideName={slide.name || `슬라이드 ${slideIdx + 1}`}
             onApply={(effectId) => selected.length > 0 && applyEffect(selected, effectId)}
             onApplyScreen={(effectId) => applyScreenFx(slideIdx, effectId)}
+            onNewEffect={(category) => void editEffect(newCustomEffect(category), true)}
+            onEditEffect={(id) => {
+              const found = effectsOf(deck).find((f) => f.id === id)
+              // 예전 모양으로 저장된 것도 트랙으로 옮겨서 연다
+              if (found) void editEffect(normalize(structuredClone(found)), false)
+            }}
+            customStamp={customStamp}
           />
         ) : (
           <FieldPanel

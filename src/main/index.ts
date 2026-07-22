@@ -22,6 +22,7 @@ import {
 } from './collector'
 import { currentSessionDir, currentStats } from './session'
 import { listAssets, pickAudio, pickImage } from './assets'
+import { openEffectWindow, registerEffectWindowIpc, type EffectResult } from './effect-window'
 import {
   backupCurrentDeck,
   deleteDeckFile,
@@ -296,6 +297,13 @@ app.whenReady().then(async () => {
     setSampleMode(on)
     pushOverlay()
   })
+  // 효과 편집기는 **별도 창**이다 — 키보드를 본 화면과 나눠 쓰지 않기 위해서다
+  registerEffectWindowIpc()
+  ipcMain.handle(
+    'fx:open',
+    (_e, effect: unknown, fresh: boolean): Promise<EffectResult> =>
+      openEffectWindow(mainWindow, effect, fresh)
+  )
   ipcMain.handle('assets:pick-image', () => pickImage())
   ipcMain.handle('assets:pick-audio', () => pickAudio())
   ipcMain.handle('assets:list', () => listAssets())

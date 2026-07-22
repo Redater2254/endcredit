@@ -30,7 +30,9 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
           // OBS 브라우저 소스가 여는 페이지. Express 가 /overlay 로 서빙한다.
-          overlay: resolve(__dirname, 'src/renderer/overlay.html')
+          overlay: resolve(__dirname, 'src/renderer/overlay.html'),
+          // 효과 편집기 — 키보드 다툼을 피하려고 아예 별도 창이다
+          fx: resolve(__dirname, 'src/renderer/fx.html')
         }
       }
     },
