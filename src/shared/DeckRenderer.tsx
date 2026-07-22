@@ -4,10 +4,14 @@ import { buildKeyframesCss, getEffect, keyframeName } from './effects'
 import { interpolate, interpolateRuns } from './fields'
 import {
   audioOf,
+  backgroundOf,
+  boundsOf,
+  groupMotion,
+  hasMotion,
   isHiddenWhenEmpty,
   lineForRank,
   linesForElement,
-  delaysFor,
+  rebaseFrame,
   slideDurationMs,
   slideTiming,
   slideHeightRatio,
@@ -128,6 +132,8 @@ export function DeckRenderer({
    */
   if (!current || (slideIndex === null && !playing)) return <div />
 
+  const bg = backgroundOf(current)
+
   return (
     <div
       style={{
@@ -135,10 +141,32 @@ export function DeckRenderer({
         width: '100%',
         height: '100%',
         overflow: 'hidden',
-        background: current.background.transparent ? 'transparent' : current.background.color,
+        background: bg.transparent ? 'transparent' : bg.color,
         fontFamily: deck.font.family
       }}
     >
+      {/* 배경 이미지는 장 전환·스크롤과 무관하게 바닥에 깔린다.
+          스크롤 장에서 배경까지 같이 흐르면 멀미가 난다. */}
+      {bg.image && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundImage: `url("${bg.image}")`,
+            backgroundSize: bg.imageFit === 'stretch' ? '100% 100%' : bg.imageFit,
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            opacity: bg.imageOpacity / 100,
+            ...(bg.imageBlur > 0
+              ? {
+                  filter: `blur(${bg.imageBlur}px)`,
+                  // 흐리게 하면 가장자리가 투명해진다 — 살짝 키워 테두리를 덮는다
+                  transform: `scale(${1 + bg.imageBlur / 100})`
+                }
+              : {})
+          }}
+        />
+      )}
       {audio && (
         <AudioLayer deck={deck} slide={current} playing={playing} generation={generation} />
       )}
@@ -253,7 +281,36 @@ function SlideView({
     (e) => e.visible && e.id !== hideElementId && (editing || !isHiddenWhenEmpty(e, data))
   )
   // 목록 순서가 곧 등장 순서다 (묶음은 한 차례를 공유) · 퇴장은 장 끝에 맞춘다
-  const { delays, exitAt } = slideTiming(slide, canvasHeight)
+  const { delays, exitAt, groupDelays, groupExitAt } = slideTiming(slide, canvasHeight)
+
+  /**
+   * 그릴 것들의 목록.
+   *
+   * 효과가 걸린 묶음만 **상자 하나로 감싼다**. 상자가 있어야 덩어리 전체를 하나로
+   * 움직일 수 있지만, 감싸는 순간 그 안의 요소들이 겹침 순서에서 붙어버린다.
+   * 그래서 효과가 없는 묶음(= 이름만 붙인 폴더)은 예전처럼 납작하게 그린다.
+   */
+  const rows: (
+    | { kind: 'el'; el: SlideElement }
+    | { kind: 'group'; gid: string; motion: Motion; members: SlideElement[] }
+  )[] = []
+  const boxed = new Set<string>()
+  for (const e of visible) {
+    const gid = e.groupId
+    const gm = gid ? groupMotion(slide, gid) : null
+    if (!gid || !hasMotion(gm)) {
+      rows.push({ kind: 'el', el: e })
+      continue
+    }
+    if (boxed.has(gid)) continue
+    boxed.add(gid)
+    rows.push({
+      kind: 'group',
+      gid,
+      motion: gm!,
+      members: visible.filter((m) => m.groupId === gid)
+    })
+  }
 
   const tr = transitionOf(slide)
   const transitionStyle: React.CSSProperties =
@@ -268,26 +325,69 @@ function SlideView({
         data-slide-inner=""
         style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: contentPx }}
       >
-        {visible.map((el, i) => {
+        {rows.map((row, i) => {
+          const lead = row.kind === 'el' ? row.el : row.members[0]
           const reveal: Reveal = !playing
             ? 'off'
             : slide.kind === 'scroll'
-              ? revealed.has(el.id)
+              ? revealed.has(lead.id)
                 ? 'go'
                 : 'pending'
               : 'go'
+
+          if (row.kind === 'el') {
+            return (
+              <ElementView
+                key={row.el.id}
+                el={row.el}
+                data={data}
+                reveal={reveal}
+                index={i}
+                slideRatio={ratio}
+                delayMs={delays[row.el.id] ?? row.el.motion.delayMs}
+                exitAtMs={exitAt[row.el.id]}
+                editing={editing}
+              />
+            )
+          }
+
+          const box = boundsOf(row.members)
           return (
-            <ElementView
-              key={el.id}
-              el={el}
-              data={data}
-              reveal={reveal}
-              index={i}
-              slideRatio={ratio}
-              delayMs={delays[el.id] ?? el.motion.delayMs}
-              exitAtMs={exitAt[el.id]}
-              editing={editing}
-            />
+            <div
+              key={row.gid}
+              data-group-id={row.gid}
+              style={{
+                position: 'absolute',
+                left: `${box.x}%`,
+                top: `${box.y / ratio}%`,
+                width: `${box.w}%`,
+                height: `${box.h / ratio}%`,
+                ...(reveal === 'pending' && row.motion.preset !== 'none' ? { opacity: 0 } : {}),
+                ...(reveal === 'go'
+                  ? animationStyle(
+                      { ...row.motion, delayMs: groupDelays[row.gid] ?? row.motion.delayMs },
+                      0,
+                      groupExitAt[row.gid]
+                    )
+                  : {})
+              }}
+            >
+              {row.members.map((el, j) => (
+                <ElementView
+                  key={el.id}
+                  // 상자 안에서는 좌표가 상자 기준으로 다시 잡힌다.
+                  // 그래야 확대·회전이 **덩어리 한가운데**를 축으로 돈다.
+                  el={{ ...el, frame: rebaseFrame(el.frame, box) } as SlideElement}
+                  data={data}
+                  reveal={reveal}
+                  index={j}
+                  slideRatio={1}
+                  delayMs={delays[el.id] ?? el.motion.delayMs}
+                  exitAtMs={exitAt[el.id]}
+                  editing={editing}
+                />
+              ))}
+            </div>
           )
         })}
       </div>

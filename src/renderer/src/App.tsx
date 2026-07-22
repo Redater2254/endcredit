@@ -9,9 +9,78 @@ import markUrl from './assets/mark.png'
 import { VERSION_LABEL } from '@shared/constants'
 
 type Tab = 'broadcast' | 'editor'
+type Theme = 'dark' | 'light'
+
+/**
+ * 밝은 · 어두운 테마 전환.
+ *
+ * 값은 `<html data-theme>` 에만 얹는다 — styles.css 가 그 한 글자를 보고 색을 통째로
+ * 갈아끼우므로, 화면을 그리는 컴포넌트들은 테마를 전혀 몰라도 된다.
+ * 저장은 localStorage 다: 창 크기·칸 너비 같은 다른 화면 설정과 같은 자리에 둔다.
+ * (프리셋에 담기면 남에게 프리셋을 줄 때 그 사람 테마까지 바꿔버린다.)
+ */
+function useTheme(): [Theme, () => void] {
+  const [theme, setTheme] = useState<Theme>(
+    () => (localStorage.getItem('ui:theme') as Theme) || 'dark'
+  )
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('ui:theme', theme)
+  }, [theme])
+
+  const toggle = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), [])
+
+  // Ctrl+Shift+L — 에디터의 다른 단축키와 겹치지 않는 조합이다
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault()
+        toggle()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [toggle])
+
+  return [theme, toggle]
+}
+
+function ThemeButton({ theme, onToggle }: { theme: Theme; onToggle: () => void }): React.JSX.Element {
+  const dark = theme === 'dark'
+  return (
+    <button
+      className="theme-btn"
+      onClick={onToggle}
+      title={dark ? '밝은 테마로 (Ctrl+Shift+L)' : '어두운 테마로 (Ctrl+Shift+L)'}
+    >
+      {dark ? (
+        // 지금 어두우니 "해"를 보여준다 — 누르면 밝아진다는 뜻
+        <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden>
+          <circle cx="10" cy="10" r="3.6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M10 1.6v2.2M10 16.2v2.2M1.6 10h2.2M16.2 10h2.2" />
+            <path d="M4.1 4.1l1.6 1.6M14.3 14.3l1.6 1.6M15.9 4.1l-1.6 1.6M5.7 14.3l-1.6 1.6" />
+          </g>
+        </svg>
+      ) : (
+        <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden>
+          <path
+            d="M16.5 12.4A7 7 0 0 1 7.6 3.5a7 7 0 1 0 8.9 8.9Z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+    </button>
+  )
+}
 
 export default function App(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('broadcast')
+  const [theme, toggleTheme] = useTheme()
   const [auth, setAuth] = useState<AuthState>({ status: 'logged-out' })
   const [server, setServer] = useState<ServerStatus | null>(null)
   const [overlay, setOverlay] = useState<OverlayInfo | null>(null)
@@ -61,6 +130,7 @@ export default function App(): React.JSX.Element {
             크레딧 에디터
           </button>
         </nav>
+        <ThemeButton theme={theme} onToggle={toggleTheme} />
       </header>
 
       {tab === 'editor' ? (

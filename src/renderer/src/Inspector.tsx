@@ -1,12 +1,30 @@
 import { useState } from 'react'
 import { EFFECTS, getEffect } from '@shared/effects'
-import { appearOrderOf, groupName, orderOf, runsToText, transitionOf } from '@shared/deck'
+import {
+  appearOrderOf,
+  backgroundOf,
+  DEFAULT_MOTION,
+  groupMotion,
+  groupName,
+  hasMotion,
+  orderOf,
+  runsToText,
+  transitionOf
+} from '@shared/deck'
 import { exitDurationOf } from '@shared/preset'
 import { getScreenEffect, SCREEN_EFFECTS, type ScreenFx } from '@shared/screen-fx'
 import { availableFonts } from './fonts'
 import { hasFields, interpolate } from '@shared/fields'
 import type { CreditData } from '@shared/aggregate'
-import type { DataElement, RankElement, Slide, SlideElement, TextStyle } from '@shared/deck'
+import type {
+  DataElement,
+  Motion,
+  RankElement,
+  Slide,
+  SlideElement,
+  SlideGroup,
+  TextStyle
+} from '@shared/deck'
 import { SOURCE_OPTIONS } from './sources'
 import { EFFECT_DRAG_TYPE } from './EffectLibrary'
 import { Splitter, useSplit } from './Splitter'
@@ -92,6 +110,10 @@ export function Inspector({
   onGroup,
   onUngroup,
   onRenameGroup,
+  onPatchGroup,
+  onDropGroupEffect,
+  onPickBackground,
+  onApplyBackgroundToAll,
   onScreenFx,
   data
 }: {
@@ -114,6 +136,12 @@ export function Inspector({
   onGroup: () => void
   onUngroup: () => void
   onRenameGroup: (gid: string, name: string) => void
+  /** 묶음 자체의 설정 (이름·묶음 효과·안쪽 등장 방식) */
+  onPatchGroup: (gid: string, p: Partial<SlideGroup>) => void
+  /** 폴더 줄에 효과를 떨어뜨리면 **묶음 전체**에 걸린다 */
+  onDropGroupEffect: (gid: string, effectId: string) => void
+  onPickBackground: () => void
+  onApplyBackgroundToAll: () => void
   /** 화면 전체 효과 (폭죽·눈 …). null 이면 없앤다 */
   onScreenFx: (fx: ScreenFx | null) => void
   /** 데이터 필드가 실제로 어떻게 보이는지 미리 보여주기 위해 */
@@ -166,12 +194,27 @@ export function Inspector({
               <div key={row.gid} className="lay-group">
                 {/* 폴더 줄 — 눈 · 펼침 · 폴더 · 이름 (포토샵과 같은 순서·간격) */}
                 <div
-                  className={`lay-row ${
-                    row.members.every((m) => selectedIds.includes(m.id)) ? 'sel' : ''
-                  }`}
+                  className={[
+                    'lay-row',
+                    row.members.every((m) => selectedIds.includes(m.id)) ? 'sel' : '',
+                    dropOn === row.gid ? 'drop' : ''
+                  ].join(' ')}
                   onClick={(ev) =>
                     onSelect(row.members[0].id, { additive: ev.shiftKey, alone: false })
                   }
+                  onDragOver={(ev) => {
+                    if (!ev.dataTransfer.types.includes(EFFECT_DRAG_TYPE)) return
+                    ev.preventDefault()
+                    setDropOn(row.gid)
+                  }}
+                  onDragLeave={() => setDropOn(null)}
+                  onDrop={(ev) => {
+                    ev.preventDefault()
+                    setDropOn(null)
+                    const fx = ev.dataTransfer.getData(EFFECT_DRAG_TYPE)
+                    // 폴더에 떨어뜨렸으면 **덩어리 전체**에 건다 (안의 요소는 그대로 둔다)
+                    if (fx) onDropGroupEffect(row.gid, fx)
+                  }}
                 >
                   <button
                     className={`lay-eye ${row.members.some((m) => m.visible) ? 'on' : ''}`}
@@ -226,6 +269,13 @@ export function Inspector({
                       }}
                     >
                       {groupName(slide, row.gid, row.order)}
+                    </span>
+                  )}
+
+                  {/* 묶음에 걸린 효과. 안의 요소 효과와 헷갈리지 않게 폴더 줄에만 뜬다 */}
+                  {hasMotion(groupMotion(slide, row.gid)) && (
+                    <span className="lay-eff" title="묶음 전체에 걸린 효과">
+                      {motionLabel(groupMotion(slide, row.gid)!)}
                     </span>
                   )}
 
@@ -305,7 +355,14 @@ export function Inspector({
 
         {/* 요소를 잡았을 땐 슬라이드 칸을 띄우지 않는다 — 빈 곳을 눌러 선택을 풀면 나온다 */}
         {chosen.length > 1 ? (
-          <MultiProps chosen={chosen} onPatch={onPatch} onGroup={onGroup} onUngroup={onUngroup} />
+          <MultiProps
+            chosen={chosen}
+            slide={slide}
+            onPatch={onPatch}
+            onGroup={onGroup}
+            onUngroup={onUngroup}
+            onPatchGroup={onPatchGroup}
+          />
         ) : el ? (
           <ElementProps
             el={el}
@@ -324,6 +381,8 @@ export function Inspector({
             onPatch={onPatchSlide}
             onSplit={onSplitSlide}
             canSplit={canSplitSlide}
+            onPickBackground={onPickBackground}
+            onApplyBackgroundToAll={onApplyBackgroundToAll}
           />
         )}
       </div>
@@ -336,6 +395,13 @@ export function Inspector({
  *   눈 · (펼침칸) · 썸네일 · 이름
  * 묶음 안의 요소는 펼침칸만큼 한 칸 밀려 폴더 아래로 들어간 것처럼 보인다.
  */
+/** "나타나기 → 사라지기" 처럼 등장·퇴장을 한 줄로. */
+function motionLabel(m: Motion): string {
+  const inName = m.preset !== 'none' ? getEffect(m.preset).name : ''
+  const outName = m.exit ? getEffect(m.exit).name : ''
+  return outName ? `${inName || '—'} → ${outName}` : inName
+}
+
 function LayerRow({
   e,
   index,
@@ -373,9 +439,7 @@ function LayerRow({
   setDropOn: (id: string | null) => void
 }): React.JSX.Element {
   // 등장과 퇴장을 함께 걸 수 있으므로 둘 다 보여준다
-  const inName = e.motion.preset !== 'none' ? getEffect(e.motion.preset).name : ''
-  const outName = e.motion.exit ? getEffect(e.motion.exit).name : ''
-  const eff = outName ? `${inName || '—'} → ${outName}` : inName
+  const eff = motionLabel(e.motion)
 
   return (
     <div
@@ -458,19 +522,34 @@ function LayerRow({
   )
 }
 
-/** 여러 개를 잡았을 때 — 묶기와 공통 효과만 다룬다. */
+/**
+ * 여러 개를 잡았을 때.
+ *
+ * 묶음을 통째로 잡았으면 **묶음 효과만** 다룬다. 안의 요소는 폴더를 펼쳐
+ * 하나씩 고르면 그 요소의 속성 칸이 그대로 나오므로, 여기에 "전부에 적용"을
+ * 또 두면 실수로 안쪽 효과를 통째로 덮어쓰게 된다.
+ *
+ * 묶이지 않은 여러 개를 잡았을 때만 예전처럼 공통 효과를 건다.
+ */
 function MultiProps({
   chosen,
+  slide,
   onPatch,
   onGroup,
-  onUngroup
+  onUngroup,
+  onPatchGroup
 }: {
   chosen: SlideElement[]
+  slide: Slide
   onPatch: (p: Partial<SlideElement>) => void
   onGroup: () => void
   onUngroup: () => void
+  onPatchGroup: (gid: string, p: Partial<SlideGroup>) => void
 }): React.JSX.Element {
-  const grouped = chosen.every((e) => e.groupId) && new Set(chosen.map((e) => e.groupId)).size === 1
+  const gid = chosen[0].groupId
+  const grouped =
+    Boolean(gid) && chosen.every((e) => e.groupId === gid) &&
+    slide.elements.filter((e) => e.groupId === gid).length === chosen.length
   const mo = chosen[0].motion
 
   return (
@@ -487,60 +566,160 @@ function MultiProps({
       </Field>
 
       <p className="ps-note">
-        묶으면 하나만 눌러도 전체가 잡히고, 효과도 함께 걸립니다. (Alt+클릭 = 안에서 하나만)
+        {grouped
+          ? '안의 요소는 폴더를 펼쳐 하나씩 고르면 따로 고칠 수 있습니다. (Alt+클릭도 됩니다)'
+          : '묶으면 하나만 눌러도 전체가 잡힙니다. (Alt+클릭 = 안에서 하나만)'}
       </p>
 
+      {grouped && gid ? (
+        <GroupMotionFields slide={slide} gid={gid} onPatchGroup={onPatchGroup} />
+      ) : (
+        <>
+          <hr />
+          <p className="ps-note">아래는 선택한 요소 각각에 걸립니다.</p>
+          <Field label="등장 효과" hint="선택한 전부에 적용">
+            <Select
+              value={mo.preset}
+              onChange={(p) => onPatch({ motion: { ...mo, preset: p } })}
+              options={ENTRANCE_OPTIONS}
+            />
+          </Field>
+          <Field label="퇴장 효과" hint="장이 끝나기 직전">
+            <Select
+              value={mo.exit ?? ''}
+              onChange={(v) => onPatch({ motion: { ...mo, exit: v === '' ? null : v } })}
+              options={EXIT_OPTIONS}
+            />
+          </Field>
+          <Field label="효과 속도">
+            <Slider
+              min={100}
+              max={2500}
+              step={50}
+              value={mo.durationMs}
+              onChange={(durationMs) => onPatch({ motion: { ...mo, durationMs } })}
+              suffix="ms"
+            />
+          </Field>
+          <Field label="시작 지연">
+            <Slider
+              min={0}
+              max={3000}
+              step={50}
+              value={mo.delayMs}
+              onChange={(delayMs) => onPatch({ motion: { ...mo, delayMs } })}
+              suffix="ms"
+            />
+          </Field>
+          <Field label="강조 효과">
+            <Select
+              value={mo.loop ?? ''}
+              onChange={(v) => onPatch({ motion: { ...mo, loop: v === '' ? null : v } })}
+              options={[
+                { value: '', label: '없음' },
+                ...EFFECTS.filter((e) => e.category === 'emphasis').map((e) => ({
+                  value: e.id,
+                  label: e.name
+                }))
+              ]}
+            />
+          </Field>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 묶음 **자체**에 걸리는 효과.
+ *
+ * 안의 요소들을 감싼 상자 하나에 걸리므로, 확대·회전은 덩어리 한가운데를 축으로 돈다.
+ * 효과를 하나도 안 걸면 상자를 아예 만들지 않아 겹침 순서가 예전 그대로 유지된다.
+ */
+function GroupMotionFields({
+  slide,
+  gid,
+  onPatchGroup
+}: {
+  slide: Slide
+  gid: string
+  onPatchGroup: (gid: string, p: Partial<SlideGroup>) => void
+}): React.JSX.Element {
+  const m = groupMotion(slide, gid) ?? DEFAULT_MOTION
+  const set = (p: Partial<Motion>): void => onPatchGroup(gid, { motion: { ...m, ...p } })
+  const on = hasMotion(groupMotion(slide, gid))
+
+  return (
+    <>
       <hr />
-      <Field label="등장 효과" hint="선택한 전부에 적용">
+      <p className="ps-note">
+        <b>묶음 전체</b>에 걸리는 효과입니다. 덩어리가 통째로 하나처럼 움직입니다.
+      </p>
+      <Field label="묶음 등장 효과" hint="폴더 줄에 효과를 끌어다 놔도 됩니다">
         <Select
-          value={mo.preset}
-          onChange={(p) => onPatch({ motion: { ...mo, preset: p } })}
+          value={m.preset}
+          onChange={(preset) => set({ preset })}
           options={ENTRANCE_OPTIONS}
         />
       </Field>
-      <Field label="퇴장 효과" hint="장이 끝나기 직전">
+      <Field label="묶음 퇴장 효과">
         <Select
-          value={mo.exit ?? ''}
-          onChange={(v) =>
-            onPatch({ motion: { ...mo, exit: v === '' ? null : v } })
-          }
+          value={m.exit ?? ''}
+          onChange={(v) => set({ exit: v === '' ? null : v })}
           options={EXIT_OPTIONS}
         />
       </Field>
-      <Field label="효과 속도">
-        <Slider
-          min={100}
-          max={2500}
-          step={50}
-          value={mo.durationMs}
-          onChange={(durationMs) => onPatch({ motion: { ...mo, durationMs } })}
-          suffix="ms"
-        />
-      </Field>
-      <Field label="시작 지연">
-        <Slider
-          min={0}
-          max={3000}
-          step={50}
-          value={mo.delayMs}
-          onChange={(delayMs) => onPatch({ motion: { ...mo, delayMs } })}
-          suffix="ms"
-        />
-      </Field>
-      <Field label="강조 효과">
-        <Select
-          value={mo.loop ?? ''}
-          onChange={(v) => onPatch({ motion: { ...mo, loop: v === '' ? null : v } })}
+      {on && (
+        <>
+          <Field label="묶음 효과 속도">
+            <Slider
+              min={100}
+              max={2500}
+              step={50}
+              value={m.durationMs}
+              onChange={(durationMs) => set({ durationMs })}
+              suffix="ms"
+            />
+          </Field>
+          <Field label="묶음 강조 효과" hint="등장 뒤 계속 반복">
+            <Select
+              value={m.loop ?? ''}
+              onChange={(v) => set({ loop: v === '' ? null : v })}
+              options={[
+                { value: '', label: '없음' },
+                ...EFFECTS.filter((e) => e.category === 'emphasis').map((e) => ({
+                  value: e.id,
+                  label: e.name
+                }))
+              ]}
+            />
+          </Field>
+        </>
+      )}
+      {orderOf(slide).mode === 'manual' && (
+        <Field label="묶음 시작 지연">
+          <Slider
+            min={0}
+            max={3000}
+            step={50}
+            value={m.delayMs}
+            onChange={(delayMs) => set({ delayMs })}
+            suffix="ms"
+          />
+        </Field>
+      )}
+
+      <Field label="안의 요소 등장" hint="‘순서대로’ 모드에서만">
+        <SegButtons
+          value={slide.groups?.[gid]?.inner ?? 'together'}
+          onChange={(inner) => onPatchGroup(gid, { inner })}
           options={[
-            { value: '', label: '없음' },
-            ...EFFECTS.filter((e) => e.category === 'emphasis').map((e) => ({
-              value: e.id,
-              label: e.name
-            }))
+            { value: 'together', label: '함께' },
+            { value: 'sequence', label: '차례로' }
           ]}
         />
       </Field>
-    </div>
+    </>
   )
 }
 
@@ -1057,7 +1236,9 @@ function SlideProps({
   onPatch,
   onScreenFx,
   onSplit,
-  canSplit
+  canSplit,
+  onPickBackground,
+  onApplyBackgroundToAll
 }: {
   slide: Slide
   onPatch: (p: Partial<Slide>) => void
@@ -1065,7 +1246,12 @@ function SlideProps({
   onScreenFx: (fx: ScreenFx | null) => void
   onSplit: () => void
   canSplit: boolean
+  onPickBackground: () => void
+  onApplyBackgroundToAll: () => void
 }): React.JSX.Element {
+  const bg = backgroundOf(slide)
+  const setBg = (p: Partial<typeof bg>): void => onPatch({ background: { ...bg, ...p } })
+
   return (
     <div className="fields">
       {canSplit && (
@@ -1241,20 +1427,79 @@ function SlideProps({
           </Field>
         </>
       )}
+      <hr />
       <Field label="배경">
         <CheckBox
-          checked={slide.background.transparent}
-          onChange={(transparent) => onPatch({ background: { ...slide.background, transparent } })}
+          checked={bg.transparent}
+          onChange={(transparent) => setBg({ transparent })}
           label="투명 (끄면 방송 화면을 가림)"
         />
       </Field>
-      {!slide.background.transparent && (
+      {!bg.transparent && (
         <Field label="배경색">
-          <ColorInput
-            value={slide.background.color}
-            onChange={(color) => onPatch({ background: { ...slide.background, color } })}
-          />
+          <ColorInput value={bg.color} onChange={(color) => setBg({ color })} />
         </Field>
+      )}
+
+      {/* 배경 이미지는 색 위에 겹쳐 깔린다 — 투명 PNG 를 써도 뒤가 비지 않는다 */}
+      <Field label="배경 이미지" hint={bg.image ? '' : '장 전체에 깔립니다'}>
+        {bg.image ? (
+          <span className="row" style={{ gap: '0.4rem', alignItems: 'center' }}>
+            <img
+              src={bg.image}
+              alt=""
+              style={{
+                width: 52,
+                height: 30,
+                objectFit: 'cover',
+                borderRadius: 3,
+                flex: 'none',
+                background: '#000'
+              }}
+            />
+            <button onClick={onPickBackground}>바꾸기…</button>
+            <button onClick={() => setBg({ image: null })}>지우기</button>
+          </span>
+        ) : (
+          <button onClick={onPickBackground}>파일 선택…</button>
+        )}
+      </Field>
+
+      {bg.image && (
+        <>
+          <Field label="이미지 맞춤">
+            <SegButtons
+              value={bg.imageFit}
+              onChange={(imageFit) => setBg({ imageFit })}
+              options={[
+                { value: 'cover', label: '채우기' },
+                { value: 'contain', label: '전체 보기' },
+                { value: 'stretch', label: '늘이기' }
+              ]}
+            />
+          </Field>
+          <Field label="이미지 불투명도" hint="낮추면 글자가 잘 읽힙니다">
+            <Slider
+              min={0}
+              max={100}
+              value={bg.imageOpacity}
+              onChange={(imageOpacity) => setBg({ imageOpacity })}
+              suffix="%"
+            />
+          </Field>
+          <Field label="이미지 흐림">
+            <Slider
+              min={0}
+              max={40}
+              value={bg.imageBlur}
+              onChange={(imageBlur) => setBg({ imageBlur })}
+              suffix="px"
+            />
+          </Field>
+          <Field label="모든 장에" hint="이 배경을 크레딧 전체에 똑같이">
+            <button onClick={onApplyBackgroundToAll}>모든 장에 적용</button>
+          </Field>
+        </>
       )}
     </div>
   )

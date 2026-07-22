@@ -1,6 +1,7 @@
 import type { CreditData } from './aggregate'
 import { builtinAudioUrl } from './builtin-audio'
 import { DEFAULT_MOTION, exitDurationOf, type Motion, type SourceKind } from './preset'
+export { DEFAULT_MOTION }
 import { getScreenEffect, type ScreenFx } from './screen-fx'
 
 /** 이 화면 효과가 계속 반복되는지 (반복이면 장 길이에 영향을 주지 않는다) */
@@ -191,6 +192,62 @@ export const DEFAULT_DECK_AUDIO: DeckAudio = {
   loop: true
 }
 
+/**
+ * 장의 바닥.
+ *
+ * 색과 이미지는 **겹쳐서** 깔린다 — 이미지가 투명한 PNG 여도 뒤가 비지 않고,
+ * 이미지를 반투명하게 낮추면 색이 배어 나와 톤을 잡을 수 있다.
+ * 예전 문서에는 이미지 항목이 없으므로 전부 선택 항목이고, backgroundOf() 로 채운다.
+ */
+export interface SlideBackground {
+  transparent: boolean
+  color: string
+  /** 로컬 서버가 내보내는 주소. 없으면 이미지 없음 */
+  image?: string | null
+  /**
+   * cover   — 화면을 꽉 채운다 (넘치는 부분은 잘림)
+   * contain — 잘리지 않게 전부 보이게 (남는 곳은 배경색)
+   * stretch — 비율을 무시하고 화면에 맞춰 늘인다
+   */
+  imageFit?: 'cover' | 'contain' | 'stretch'
+  /** 0~100. 낮추면 글자가 잘 읽힌다 */
+  imageOpacity?: number
+  /** 흐림 (px). 사진 위에 글자를 얹을 때 쓴다 */
+  imageBlur?: number
+}
+
+const DEFAULT_BACKGROUND: Required<SlideBackground> = {
+  transparent: true,
+  color: '#000000',
+  image: null,
+  imageFit: 'cover',
+  imageOpacity: 100,
+  imageBlur: 0
+}
+
+/** 예전 문서에도 안전하게 배경 설정을 얻는다. */
+export function backgroundOf(slide: Slide): Required<SlideBackground> {
+  return { ...DEFAULT_BACKGROUND, ...slide.background }
+}
+
+/**
+ * 묶음(폴더) 하나.
+ *
+ * 이름만 있던 값에 **묶음 자체의 효과**가 붙었다. 묶음 효과는 덩어리 전체를 감싼
+ * 상자에 걸리고, 안의 요소 효과는 그 상자 안에서 따로 논다 — 둘은 서로를 덮지 않는다.
+ */
+export interface SlideGroup {
+  name: string
+  /** 덩어리 전체에 걸리는 효과. 없으면 상자를 만들지 않고 예전처럼 납작하게 그린다 */
+  motion?: Motion | null
+  /**
+   * 안의 요소가 등장하는 방식 ('순서대로' 모드에서만 의미가 있다).
+   *  together — 한 차례를 공유해 함께 (기본, 예전 동작)
+   *  sequence — 각자 한 차례씩 차례로
+   */
+  inner?: 'together' | 'sequence'
+}
+
 export interface Slide {
   id: string
   name: string
@@ -206,10 +263,7 @@ export interface Slide {
     /** 내용 높이 (캔버스 높이 대비 %, 100 = 한 화면) */
     contentHeight: number
   }
-  background: {
-    transparent: boolean
-    color: string
-  }
+  background: SlideBackground
   /** 이 슬라이드가 화면에 나타날 때의 전환 효과 (요소 효과와 별개로 장 전체에 걸린다) */
   transition: { preset: string; durationMs: number; easing: string }
   /**
@@ -218,8 +272,8 @@ export interface Slide {
    *  manual — 요소마다 지정한 시작 지연을 그대로 쓴다
    */
   order?: { mode: 'order' | 'manual'; gapMs: number }
-  /** 묶음(폴더) 이름. 요소에는 groupId 만 두고 이름은 여기 모아둔다. */
-  groups?: Record<string, { name: string }>
+  /** 묶음(폴더). 요소에는 groupId 만 두고 이름·효과는 여기 모아둔다. */
+  groups?: Record<string, SlideGroup>
   /** 이 장이 화면에 나타날 때 한 번 울리는 효과음 */
   sound?: AudioClip | null
   /**
@@ -357,6 +411,42 @@ export function groupName(slide: Slide, gid: string, index: number): string {
   return slide.groups?.[gid]?.name || `그룹 ${index}`
 }
 
+/** 묶음 자체에 걸린 효과. 없으면 null (= 상자를 만들지 않는다). */
+export function groupMotion(slide: Slide, gid: string): Motion | null {
+  return slide.groups?.[gid]?.motion ?? null
+}
+
+/** 실제로 화면에서 움직이는 효과가 걸려 있는지. 전부 비었으면 상자가 필요 없다. */
+export function hasMotion(m: Motion | null | undefined): boolean {
+  if (!m) return false
+  return (m.preset !== 'none' && m.durationMs > 0) || Boolean(m.loop) || Boolean(m.exit)
+}
+
+/** 묶음에 속한 요소들 (목록 순서 그대로). */
+export function groupMembers(slide: Slide, gid: string): SlideElement[] {
+  return slide.elements.filter((e) => e.groupId === gid)
+}
+
+/** 요소 여럿을 감싸는 최소 사각형 (캔버스 대비 %). */
+export function boundsOf(elements: SlideElement[]): Frame {
+  const x = Math.min(...elements.map((e) => e.frame.x))
+  const y = Math.min(...elements.map((e) => e.frame.y))
+  const r = Math.max(...elements.map((e) => e.frame.x + e.frame.w))
+  const b = Math.max(...elements.map((e) => e.frame.y + e.frame.h))
+  // 폭이 0 이면 나눗셈이 무너진다 — 아주 얇은 도형도 상자 하나는 갖게 한다
+  return { x, y, w: Math.max(0.01, r - x), h: Math.max(0.01, b - y) }
+}
+
+/** 바깥 상자 기준의 상대 좌표로 옮긴다 (상자 안에서 다시 % 로 잡히도록). */
+export function rebaseFrame(f: Frame, box: Frame): Frame {
+  return {
+    x: ((f.x - box.x) / box.w) * 100,
+    y: ((f.y - box.y) / box.h) * 100,
+    w: (f.w / box.w) * 100,
+    h: (f.h / box.h) * 100
+  }
+}
+
 /** 예전 문서에는 order 가 없다 — 읽을 때 기본값을 채운다. */
 export function orderOf(slide: Slide): { mode: 'order' | 'manual'; gapMs: number } {
   return slide.order ?? { mode: 'order', gapMs: 260 }
@@ -369,48 +459,70 @@ export function orderOf(slide: Slide): { mode: 'order' | 'manual'; gapMs: number
  * 요소들은 한 차례를 공유해 함께 등장한다 — 묶었으면 하나처럼 움직여야 하니까.
  */
 export function delaysFor(slide: Slide): Record<string, number> {
+  return allDelays(slide).el
+}
+
+/** 요소와 묶음 상자의 시작 지연을 한 번에. 둘은 같은 차례 계산을 공유해야 어긋나지 않는다. */
+function allDelays(slide: Slide): { el: Record<string, number>; group: Record<string, number> } {
   const o = orderOf(slide)
-  const out: Record<string, number> = {}
+  const el: Record<string, number> = {}
+  const group: Record<string, number> = {}
+  const steps = orderSteps(slide)
 
   if (o.mode === 'manual') {
-    slide.elements.forEach((e) => (out[e.id] = e.motion.delayMs))
-    return out
+    slide.elements.forEach((e) => (el[e.id] = e.motion.delayMs))
+    for (const gid of Object.keys(steps.group)) {
+      group[gid] = groupMotion(slide, gid)?.delayMs ?? 0
+    }
+    return { el, group }
   }
 
-  const steps = orderSteps(slide)
-  slide.elements.forEach((e) => (out[e.id] = (steps[e.id] ?? 0) * o.gapMs))
-  return out
+  slide.elements.forEach((e) => (el[e.id] = (steps.el[e.id] ?? 0) * o.gapMs))
+  for (const [gid, step] of Object.entries(steps.group)) group[gid] = step * o.gapMs
+  return { el, group }
 }
 
 /**
- * 요소별 등장 차례 (0부터). 묶음에 속한 요소들은 한 차례를 공유해 함께 등장한다.
+ * 요소별 등장 차례 (0부터). 묶음에 속한 요소들은 한 차례를 공유해 함께 등장한다
+ * — 묶음이 '차례로'(inner: sequence)로 설정돼 있으면 안에서도 하나씩 센다.
  *
  * 기본은 **목록 위치**지만, `motion.order` 를 넣은 요소는 그 숫자로 끼어든다.
  * 목록 순서는 겹침 순서이기도 해서 둘을 따로 정할 길이 있어야 한다.
  */
-function orderSteps(slide: Slide): Record<string, number> {
+function orderSteps(slide: Slide): { el: Record<string, number>; group: Record<string, number> } {
   const ranked = slide.elements.map((e, i) => ({ e, key: e.motion.order ?? i + 1, i }))
   ranked.sort((a, b) => a.key - b.key || a.i - b.i)
 
-  const out: Record<string, number> = {}
+  const el: Record<string, number> = {}
+  const group: Record<string, number> = {}
   let step = 0
-  const seenGroup = new Map<string, number>()
   for (const { e } of ranked) {
-    if (e.groupId) {
-      if (!seenGroup.has(e.groupId)) seenGroup.set(e.groupId, step++)
-      out[e.id] = seenGroup.get(e.groupId)!
+    const gid = e.groupId
+    if (!gid) {
+      el[e.id] = step++
+      continue
+    }
+    // 묶음이 처음 나온 자리가 곧 묶음 상자의 차례다
+    const first = group[gid] === undefined
+    if (first) group[gid] = step
+
+    if (slide.groups?.[gid]?.inner === 'sequence') {
+      el[e.id] = step++
     } else {
-      out[e.id] = step++
+      // 함께 등장 — 한 차례를 나눠 쓰고, 차례는 묶음당 한 번만 넘어간다
+      el[e.id] = group[gid]
+      if (first) step++
     }
   }
-  return out
+  return { el, group }
 }
 
 /** 화면에 보여줄 등장 차례 (1부터). */
 export function appearOrderOf(slide: Slide): Record<string, number> {
   const steps = orderSteps(slide)
   const out: Record<string, number> = {}
-  for (const [id, n] of Object.entries(steps)) out[id] = n + 1
+  for (const [id, n] of Object.entries(steps.el)) out[id] = n + 1
+  for (const [gid, n] of Object.entries(steps.group)) out[gid] = n + 1
   return out
 }
 
@@ -548,12 +660,19 @@ export interface SlideTiming {
   delays: Record<string, number>
   /** 요소별 퇴장 시작. 퇴장 효과가 없는 요소는 아예 없다 */
   exitAt: Record<string, number>
+  /** 묶음 상자의 등장 시작 · 퇴장 시작 (효과가 걸린 묶음만) */
+  groupDelays: Record<string, number>
+  groupExitAt: Record<string, number>
   /** 이 장 전체 길이 */
   durationMs: number
 }
 
 export function slideTiming(slide: Slide, canvasHeight: number): SlideTiming {
-  const delays = delaysFor(slide)
+  const { el: delays, group: groupDelays } = allDelays(slide)
+  // 효과가 걸린 묶음만 시간 계산에 낀다 — 이름만 붙여둔 묶음은 아무 일도 하지 않는다
+  const moving = Object.keys(groupDelays)
+    .map((gid) => ({ gid, motion: groupMotion(slide, gid) }))
+    .filter((g): g is { gid: string; motion: Motion } => hasMotion(g.motion))
 
   // 스크롤 장은 요소가 화면 밖으로 흘러 나가므로 퇴장 효과를 쓰지 않는다
   if (slide.kind === 'scroll') {
@@ -561,17 +680,25 @@ export function slideTiming(slide: Slide, canvasHeight: number): SlideTiming {
     return {
       delays,
       exitAt: {},
+      groupDelays,
+      groupExitAt: {},
       durationMs: ((contentPx + canvasHeight) / Math.max(10, slide.scroll.speed)) * 1000
     }
   }
 
-  const contentEnd = slide.elements.reduce(
-    (m, e) => Math.max(m, (delays[e.id] ?? e.motion.delayMs) + e.motion.durationMs),
-    0
+  const contentEnd = Math.max(
+    slide.elements.reduce(
+      (m, e) => Math.max(m, (delays[e.id] ?? e.motion.delayMs) + e.motion.durationMs),
+      0
+    ),
+    moving.reduce((m, g) => Math.max(m, groupDelays[g.gid] + g.motion.durationMs), 0)
   )
-  const longestExit = slide.elements.reduce(
-    (m, e) => (e.motion.exit ? Math.max(m, exitDurationOf(e.motion)) : m),
-    0
+  const longestExit = Math.max(
+    slide.elements.reduce(
+      (m, e) => (e.motion.exit ? Math.max(m, exitDurationOf(e.motion)) : m),
+      0
+    ),
+    moving.reduce((m, g) => (g.motion.exit ? Math.max(m, exitDurationOf(g.motion)) : m), 0)
   )
   // 퇴장이 머무는 시간보다 길면 장을 그만큼 늘린다 — 안 그러면 사라지다 말고 잘린다
   let durationMs = contentEnd + Math.max(slide.holdMs, longestExit)
@@ -589,7 +716,13 @@ export function slideTiming(slide: Slide, canvasHeight: number): SlideTiming {
     exitAt[e.id] = Math.max(contentEnd, durationMs - exitDurationOf(e.motion))
   }
 
-  return { delays, exitAt, durationMs }
+  const groupExitAt: Record<string, number> = {}
+  for (const g of moving) {
+    if (!g.motion.exit) continue
+    groupExitAt[g.gid] = Math.max(contentEnd, durationMs - exitDurationOf(g.motion))
+  }
+
+  return { delays, exitAt, groupDelays, groupExitAt, durationMs }
 }
 
 export function slideDurationMs(slide: Slide, canvasHeight: number): number {

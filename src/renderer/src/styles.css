@@ -1,13 +1,120 @@
+/*
+ * 색은 전부 여기서만 정한다.
+ *
+ * 밝은 테마를 넣으려고 만든 규칙이다. 예전에는 파일 곳곳에 #101118 같은 값이
+ * 187군데 박혀 있어서, 한 테마를 더 만들려면 그걸 다 찾아 고쳐야 했다.
+ * 새 색이 필요하면 **여기에 이름을 만들고** 아래 밝은 테마에도 짝을 채운다.
+ *
+ * OBS 로 나가는 오버레이는 이 파일을 읽지 않는다 (overlay.html 이 따로 있다).
+ * 방송 화면은 테마와 무관하다 — 여기 값을 바꿔도 시청자가 보는 그림은 그대로다.
+ */
 :root {
+  color-scheme: dark;
+
+  /* 면 — 뒤로 갈수록 깊이 들어간다 */
   --bg: #14151a;
   --panel: #1c1e26;
+  --panel-2: #1b1d26;
+  --strip: #171923;
+  --sunken: #101118;
+  --void: #0d0e13;
+
+  /* 조작 — 단추·메뉴 */
+  --ctl: #23262f;
+  --ctl-2: #262935;
+  --ctl-hover: #2c3040;
+  --ctl-active: #303442;
+  --ctl-on: #33374a;
+
+  /* 선 */
   --line: #2b2e3a;
+  --line-2: #3a3d4a;
+  --line-3: #4a4d5c;
+
+  /* 글자 — 아래로 갈수록 흐려진다 */
   --text: #e8e8ee;
+  --text-2: #d8dae5;
+  --text-3: #b9bccb;
   --dim: #8f92a3;
+  --dim-2: #5c6070;
+
+  /* 뜻이 있는 색 */
   --accent: #4f7cff;
+  --accent-hover: #6189ff;
+  --accent-text: #9ec0ff;
   --ok: #3ecf8e;
+  --on-ok: #08130d;
   --warn: #f5a623;
+  --warn-text: #f5c877;
   --err: #ff5f6d;
+  --err-text: #ffb4ba;
+  --rec: #ff3d7f;
+
+  /* 투명한 곳을 보여주는 체커보드 */
+  --checker-sq: #2a2d38;
+  --checker-a: #1a1c24;
+  --checker-b: #14161d;
+
+  /* 아주 옅은 덧칠 · 가림막 */
+  --tint: rgba(255, 255, 255, 0.015);
+  --tint-2: rgba(255, 255, 255, 0.03);
+  --scrim: rgba(20, 21, 26, 0.85);
+}
+
+/*
+ * 밝은 테마.
+ *
+ * 어두운 테마를 그대로 뒤집지 않았다. 어두울 때는 **얹힌 것이 밝고**,
+ * 밝을 때는 **파인 것이 어둡다** — 입력칸(--sunken)이 대표적으로,
+ * 어두운 테마에서는 배경보다 어둡지만 밝은 테마에서는 종이보다 살짝 어둡다.
+ * 단순 반전을 하면 이 관계가 뒤집혀 눌린 칸이 튀어나와 보인다.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #eef0f5;
+  --panel: #ffffff;
+  --panel-2: #f7f8fb;
+  --strip: #e9ebf2;
+  --sunken: #e6e9f0;
+  --void: #dcdfe8;
+
+  --ctl: #ffffff;
+  --ctl-2: #f1f2f7;
+  --ctl-hover: #e7e9f1;
+  --ctl-active: #dbdee9;
+  --ctl-on: #ccd3e8;
+
+  --line: #d7dae4;
+  --line-2: #c0c4d1;
+  --line-3: #a4a9b9;
+
+  --text: #1b1d26;
+  --text-2: #333747;
+  --text-3: #4d5163;
+  --dim: #6c7185;
+  --dim-2: #8a8fa3;
+
+  /* 흰 바탕에서는 원래 파랑이 눈부시게 밝다 — 한 단계 내려 대비를 잡는다 */
+  --accent: #2f5fe8;
+  --accent-hover: #1e4bd0;
+  --accent-text: #2f5fe8;
+  --ok: #10935f;
+  /* 밝은 테마에서는 초록 단추가 진해지므로 그 위 글자는 반대로 하얘야 한다 */
+  --on-ok: #ffffff;
+  --warn: #b06f06;
+  --warn-text: #8a5600;
+  --err: #d33646;
+  --err-text: #ae1f2d;
+  --rec: #dc0f5c;
+
+  --checker-sq: #dde0e9;
+  --checker-a: #e4e7ee;
+  --checker-b: #f2f3f7;
+
+  --tint: rgba(0, 0, 0, 0.015);
+  --tint-2: rgba(0, 0, 0, 0.035);
+  --scrim: rgba(255, 255, 255, 0.88);
 }
 
 * {
@@ -111,7 +218,7 @@ button {
   font: inherit;
   font-weight: 600;
   border: 1px solid var(--line);
-  background: #262935;
+  background: var(--ctl-2);
   color: var(--text);
   padding: 0.55rem 1.1rem;
   border-radius: 7px;
@@ -119,7 +226,7 @@ button {
   transition: background 0.15s;
 }
 button:hover:not(:disabled) {
-  background: #303442;
+  background: var(--ctl-active);
 }
 button:disabled {
   opacity: 0.5;
@@ -130,7 +237,7 @@ button.primary {
   border-color: var(--accent);
 }
 button.primary:hover:not(:disabled) {
-  background: #6189ff;
+  background: var(--accent-hover);
 }
 
 .profile {
@@ -143,7 +250,7 @@ button.primary:hover:not(:disabled) {
   height: 56px;
   border-radius: 50%;
   object-fit: cover;
-  background: #262935;
+  background: var(--ctl-2);
   flex: none;
 }
 .profile .meta strong {
@@ -160,7 +267,7 @@ button.primary:hover:not(:disabled) {
   border: 1px solid rgba(255, 95, 109, 0.35);
   border-radius: 7px;
   padding: 0.8rem 1rem;
-  color: #ffb4ba;
+  color: var(--err-text);
   font-size: 0.82rem;
   white-space: pre-wrap;
   user-select: text;
@@ -176,14 +283,14 @@ summary {
   font-size: 0.78rem;
 }
 pre {
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 0.9rem;
   overflow: auto;
   max-height: 300px;
   font-size: 0.75rem;
-  color: #b9bccb;
+  color: var(--text-3);
   user-select: text;
   margin: 0.7rem 0 0;
 }
@@ -199,7 +306,7 @@ pre {
   margin-top: 0.9rem;
 }
 .chip {
-  background: #262935;
+  background: var(--ctl-2);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.2rem 0.65rem;
@@ -215,7 +322,7 @@ pre {
 
 .tail {
   margin-top: 0.6rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 7px;
   max-height: 340px;
@@ -234,19 +341,19 @@ pre {
   grid-template-columns: 4.6rem 11rem 1fr;
   gap: 0.6rem;
   padding: 0.3rem 0.7rem;
-  border-bottom: 1px solid #1b1d26;
+  border-bottom: 1px solid var(--panel-2);
   cursor: pointer;
   align-items: baseline;
 }
 .ev:hover {
-  background: #171923;
+  background: var(--strip);
 }
 .ev.open {
   grid-template-columns: 4.6rem 11rem 1fr;
-  background: #171923;
+  background: var(--strip);
 }
 .ev-t {
-  color: #5c6070;
+  color: var(--dim-2);
 }
 .ev-a {
   color: var(--accent);
@@ -254,7 +361,7 @@ pre {
   text-overflow: ellipsis;
 }
 .ev-s {
-  color: #b9bccb;
+  color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -291,7 +398,7 @@ pre {
   border-radius: 6px;
 }
 .tabs button.active {
-  background: #303442;
+  background: var(--ctl-active);
   color: var(--text);
 }
 
@@ -345,10 +452,10 @@ pre {
   font-size: 0.82rem;
 }
 .ed-list li:hover {
-  background: #23262f;
+  background: var(--ctl);
 }
 .ed-list li.sel {
-  background: #2c3040;
+  background: var(--ctl-hover);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .ed-list li.off .ed-name {
@@ -382,7 +489,7 @@ pre {
 .ed-ops button {
   padding: 0.12rem 0.35rem;
   font-size: 0.68rem;
-  background: #33374a;
+  background: var(--ctl-on);
 }
 
 .fields {
@@ -408,7 +515,7 @@ pre {
 .input {
   font: inherit;
   font-size: 0.84rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: 6px;
@@ -463,7 +570,7 @@ pre {
 .seg {
   display: flex;
   gap: 3px;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 3px;
@@ -478,7 +585,7 @@ pre {
   border-radius: 5px;
 }
 .seg button.active {
-  background: #33374a;
+  background: var(--ctl-on);
   color: var(--text);
 }
 .fields hr {
@@ -514,7 +621,7 @@ pre {
   border: 1px solid rgba(245, 166, 35, 0.35);
   border-radius: 7px;
   padding: 0.7rem 0.9rem;
-  color: #f5c877;
+  color: var(--warn-text);
   font-size: 0.8rem;
   line-height: 1.6;
 }
@@ -524,7 +631,7 @@ pre {
   position: relative;
   margin-top: 1rem;
   aspect-ratio: 16 / 9;
-  background: repeating-conic-gradient(#1a1c24 0% 25%, #14161d 0% 50%) 50% / 22px 22px;
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 50% / 22px 22px;
   border: 1px solid var(--line);
   border-radius: 7px;
   overflow: hidden;
@@ -551,7 +658,7 @@ pre {
   gap: 0.9rem;
 }
 .sub {
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 0.75rem 0.9rem;
@@ -565,7 +672,7 @@ pre {
 }
 .sub-empty {
   margin: 0;
-  color: #4d5060;
+  color: var(--dim-2);
   font-size: 0.78rem;
 }
 .rank,
@@ -583,7 +690,7 @@ pre {
 }
 .rank li::before {
   content: counter(r);
-  color: #5c6070;
+  color: var(--dim-2);
   width: 1.1rem;
   flex: none;
   font-variant-numeric: tabular-nums;
@@ -683,10 +790,10 @@ pre {
   border: 1px dashed transparent;
 }
 .ed2-list li:hover {
-  background: #23262f;
+  background: var(--ctl);
 }
 .ed2-list li.sel {
-  background: #2c3040;
+  background: var(--ctl-hover);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 /* 효과를 끌어왔을 때 어디에 놓이는지 분명히 보여준다 */
@@ -736,7 +843,7 @@ pre {
   height: 32px;
   border-radius: 5px;
   border: 1px solid var(--line);
-  background: #101118;
+  background: var(--sunken);
 }
 .chip-x {
   border: none;
@@ -795,7 +902,7 @@ pre {
   flex-direction: column;
   align-items: stretch;
   gap: 0.2rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.4rem;
@@ -805,7 +912,7 @@ pre {
 }
 .tile:hover {
   border-color: var(--accent);
-  background: #171a24;
+  background: var(--strip);
 }
 .tile:active {
   cursor: grabbing;
@@ -816,7 +923,7 @@ pre {
   place-items: center;
   overflow: hidden;
   border-radius: 5px;
-  background: #0b0c12;
+  background: var(--void);
 }
 .tile-demo {
   font-size: 1.15rem;
@@ -930,10 +1037,10 @@ pre {
   place-items: center;
 }
 .ps-tools button:hover {
-  background: #262935;
+  background: var(--ctl-2);
 }
 .ps-tools button.active {
-  background: #303442;
+  background: var(--ctl-active);
   border-color: var(--line);
   color: var(--accent);
 }
@@ -948,7 +1055,7 @@ pre {
 .ps-area {
   flex: 1;
   min-height: 0;
-  background: #0d0e13;
+  background: var(--void);
   border: 1px solid var(--line);
   border-radius: 8px 8px 0 0;
   display: grid;
@@ -966,13 +1073,13 @@ pre {
   flex: none;
   /* 투명 영역을 눈에 보이게 — 포토샵과 같은 체커보드 */
   background-image:
-    linear-gradient(45deg, #2a2d38 25%, transparent 25%),
-    linear-gradient(-45deg, #2a2d38 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #2a2d38 75%),
-    linear-gradient(-45deg, transparent 75%, #2a2d38 75%);
+    linear-gradient(45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-sq) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-sq) 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-  background-color: #23262f;
+  background-color: var(--ctl);
   box-shadow: 0 0 0 1px #000, 0 8px 30px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
@@ -1002,7 +1109,7 @@ pre {
   border-color: transparent;
 }
 .ps-statusbar button:hover {
-  background: #262935;
+  background: var(--ctl-2);
 }
 .ps-statusbar button.active {
   color: var(--accent);
@@ -1056,7 +1163,7 @@ pre {
   margin: 0;
   padding: 0.5rem 0.7rem;
   font-size: 0.7rem;
-  color: #5c6070;
+  color: var(--dim-2);
 }
 
 .ps-layers {
@@ -1080,10 +1187,10 @@ pre {
   border: 1px solid transparent;
 }
 .ps-layers li:hover {
-  background: #23262f;
+  background: var(--ctl);
 }
 .ps-layers li.sel {
-  background: #2c3040;
+  background: var(--ctl-hover);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .ps-layers li.drop {
@@ -1104,7 +1211,7 @@ pre {
   font-size: 11px;
   background: transparent;
   border: none;
-  color: #4d5060;
+  color: var(--dim-2);
   display: grid;
   place-items: center;
 }
@@ -1116,7 +1223,7 @@ pre {
   height: 26px;
   flex: none;
   border-radius: 4px;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   display: grid;
   place-items: center;
@@ -1236,7 +1343,7 @@ pre {
   min-width: 168px;
   max-height: 340px;
   overflow-y: auto;
-  background: #23262f;
+  background: var(--ctl);
   border: 1px solid var(--line);
   border-radius: 7px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
@@ -1316,11 +1423,11 @@ pre {
   cursor: pointer;
 }
 .sp-item:hover {
-  background: #23262f;
+  background: var(--ctl);
 }
 .sp-item.sel {
   border-color: var(--accent);
-  background: #23262f;
+  background: var(--ctl);
 }
 .sp-item.drop {
   border-color: var(--ok);
@@ -1341,13 +1448,13 @@ pre {
   overflow: hidden;
   border-radius: 4px;
   background-image:
-    linear-gradient(45deg, #2a2d38 25%, transparent 25%),
-    linear-gradient(-45deg, #2a2d38 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #2a2d38 75%),
-    linear-gradient(-45deg, transparent 75%, #2a2d38 75%);
+    linear-gradient(45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-sq) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-sq) 75%);
   background-size: 10px 10px;
   background-position: 0 0, 0 5px, 5px -5px, -5px 0;
-  background-color: #23262f;
+  background-color: var(--ctl);
   box-shadow: 0 0 0 1px #000;
   margin-left: 12px;
   pointer-events: none;
@@ -1390,7 +1497,7 @@ pre {
 .sp-ops button {
   padding: 1px 4px;
   font-size: 0.68rem;
-  background: rgba(20, 21, 26, 0.85);
+  background: var(--scrim);
   border: 1px solid var(--line);
 }
 .sp-add {
@@ -1432,7 +1539,7 @@ pre {
   border-color: transparent;
 }
 .pp-tools button:hover {
-  background: #262935;
+  background: var(--ctl-2);
   border-color: var(--line);
 }
 .pp-tools button b {
@@ -1531,7 +1638,7 @@ pre {
 
 .ps-empty {
   padding: 0.8rem;
-  color: #5c6070;
+  color: var(--dim-2);
   font-size: 0.72rem;
   text-align: center;
   cursor: default;
@@ -1574,7 +1681,7 @@ textarea.input {
 .sp-badge {
   font-style: normal;
   font-size: 0.6rem;
-  background: #33374a;
+  background: var(--ctl-on);
   color: var(--dim);
   border-radius: 3px;
   padding: 0 4px;
@@ -1681,7 +1788,7 @@ body.splitting * {
   left: 0;
   z-index: 50;
   background: var(--ok);
-  color: #08130d;
+  color: var(--on-ok);
   font-size: 0.74rem;
   font-weight: 600;
   padding: 3px 9px;
@@ -1718,7 +1825,7 @@ body.splitting * {
 }
 .sel-box.multi .sel-label {
   background: var(--ok);
-  color: #08130d;
+  color: var(--on-ok);
 }
 /* 도구 막대 구분선 */
 .pp-div {
@@ -1732,7 +1839,7 @@ body.splitting * {
   font-style: normal;
   font-size: 0.58rem;
   background: var(--ok);
-  color: #08130d;
+  color: var(--on-ok);
   border-radius: 3px;
   padding: 0 3px;
   margin-right: 4px;
@@ -1789,7 +1896,7 @@ body.splitting * {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.38rem 0.6rem;
@@ -1800,7 +1907,7 @@ body.splitting * {
 }
 .field-chip:hover {
   border-color: var(--accent);
-  background: #171a24;
+  background: var(--strip);
 }
 .field-chip:active {
   cursor: grabbing;
@@ -1820,7 +1927,7 @@ body.splitting * {
   font-variant-numeric: tabular-nums;
 }
 .fc-value.empty {
-  color: #4d5060;
+  color: var(--dim-2);
   font-size: 0.7rem;
 }
 .field-preview {
@@ -1858,7 +1965,7 @@ body.splitting * {
   padding: 0.55rem 0.85rem;
   background: rgba(245, 166, 35, 0.08);
   border-bottom: 1px solid rgba(245, 166, 35, 0.3);
-  color: #f5c877;
+  color: var(--warn-text);
   font-size: 0.78rem;
 }
 .field-empty button {
@@ -1870,7 +1977,7 @@ body.splitting * {
 .align-bar {
   display: inline-flex;
   gap: 1px;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 2px;
@@ -1888,11 +1995,11 @@ body.splitting * {
   place-items: center;
 }
 .align-bar button:hover:not(:disabled) {
-  background: #303442;
+  background: var(--ctl-active);
   color: var(--text);
 }
 .pp-tools button.active {
-  background: #303442;
+  background: var(--ctl-active);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1913,7 +2020,7 @@ body.splitting * {
 /* ── 스냅 기준선 ───────────────────────────────── */
 .snap-guide {
   position: absolute;
-  background: #ff3d7f;
+  background: var(--rec);
   pointer-events: none;
   z-index: 8;
   box-shadow: 0 0 4px rgba(255, 61, 127, 0.7);
@@ -1946,7 +2053,7 @@ body.splitting * {
 .undo-bar {
   display: inline-flex;
   gap: 1px;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 2px;
@@ -1962,7 +2069,7 @@ body.splitting * {
   color: var(--dim);
 }
 .undo-bar button:hover:not(:disabled) {
-  background: #303442;
+  background: var(--ctl-active);
   color: var(--text);
 }
 .save-badge {
@@ -2014,10 +2121,10 @@ body.splitting * {
   min-height: 30px;
 }
 .lay-row:hover {
-  background: #23262f;
+  background: var(--ctl);
 }
 .lay-row.sel {
-  background: #2c3040;
+  background: var(--ctl-hover);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 .lay-row.drop {
@@ -2036,7 +2143,7 @@ body.splitting * {
   padding: 0;
   background: transparent;
   border: none;
-  color: #d8dae5;
+  color: var(--text-2);
   display: grid;
   place-items: center;
 }
@@ -2046,10 +2153,10 @@ body.splitting * {
   width: 14px;
   height: 14px;
   border-radius: 2px;
-  border: 1px solid #3f4250;
+  border: 1px solid var(--line-2);
 }
 .lay-folder {
-  color: #c8cbd8;
+  color: var(--text-2);
   display: grid;
   place-items: center;
 }
@@ -2061,7 +2168,7 @@ body.splitting * {
   padding: 0;
   background: transparent;
   border: none;
-  color: #9a9db0;
+  color: var(--dim);
   font-size: 9px;
   display: grid;
   place-items: center;
@@ -2078,7 +2185,7 @@ body.splitting * {
   width: 24px;
   flex: none;
   text-align: center;
-  color: #b9bccb;
+  color: var(--text-3);
   font-size: 12px;
 }
 .lay-thumb {
@@ -2086,7 +2193,7 @@ body.splitting * {
   height: 24px;
   flex: none;
   border-radius: 2px;
-  border: 1px solid #3a3d4a;
+  border: 1px solid var(--line-2);
   background-image:
     linear-gradient(45deg, #6b6b6b 25%, transparent 25%),
     linear-gradient(-45deg, #6b6b6b 25%, transparent 25%),
@@ -2127,7 +2234,7 @@ body.splitting * {
   min-width: 0;
   font: inherit;
   font-size: 0.8rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--accent);
   color: var(--text);
   border-radius: 3px;
@@ -2158,7 +2265,7 @@ body.splitting * {
 /* ══ 스크롤바 — 얇고 어둡게 ═══════════════════════════════ */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3a3d4a transparent;
+  scrollbar-color: var(--line-2) transparent;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -2168,14 +2275,14 @@ body.splitting * {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3a3d4a;
+  background: var(--line-2);
   border-radius: 6px;
   /* 트랙과 살짝 떨어져 보이게 */
   border: 3px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4d5163;
+  background: var(--line-3);
   background-clip: content-box;
 }
 ::-webkit-scrollbar-corner {
@@ -2195,7 +2302,7 @@ body.splitting * {
   font: inherit;
   font-size: 0.84rem;
   font-weight: 400;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: 6px;
@@ -2225,7 +2332,7 @@ body.splitting * {
   right: 0;
   max-height: 260px;
   overflow-y: auto;
-  background: #1b1d26;
+  background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 3px;
@@ -2253,7 +2360,7 @@ body.splitting * {
   text-overflow: ellipsis;
 }
 .sel-opt:hover {
-  background: #2c3040;
+  background: var(--ctl-hover);
 }
 .sel-opt.on {
   background: var(--accent);
@@ -2355,12 +2462,12 @@ body.splitting * {
   display: inline-block;
   font-family: 'Cascadia Mono', Consolas, monospace;
   font-size: 0.74rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-bottom-width: 2px;
   border-radius: 5px;
   padding: 0.1rem 0.45rem;
-  color: #cfd2e0;
+  color: var(--text-2);
 }
 .help-note {
   margin: 0.6rem 0 0;
@@ -2467,7 +2574,7 @@ button {
   overflow-y: auto;
 }
 .tpl-card {
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.8rem;
@@ -2481,13 +2588,13 @@ button {
   border-radius: 6px;
   align-self: center;
   background-image:
-    linear-gradient(45deg, #2a2d38 25%, transparent 25%),
-    linear-gradient(-45deg, #2a2d38 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #2a2d38 75%),
-    linear-gradient(-45deg, transparent 75%, #2a2d38 75%);
+    linear-gradient(45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-sq) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-sq) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-sq) 75%);
   background-size: 14px 14px;
   background-position: 0 0, 0 7px, 7px -7px, -7px 0;
-  background-color: #23262f;
+  background-color: var(--ctl);
   box-shadow: 0 0 0 1px #000;
 }
 .tpl-thumb-inner {
@@ -2508,7 +2615,7 @@ button {
   padding: 0;
   border-radius: 50%;
   border: none;
-  background: #3a3d4a;
+  background: var(--line-2);
 }
 .tpl-dots button.on {
   background: var(--accent);
@@ -2547,7 +2654,7 @@ button {
   display: flex;
   align-items: center;
   gap: 2px;
-  background: #23262f;
+  background: var(--ctl);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 3px;
@@ -2565,7 +2672,7 @@ button {
   border-radius: 4px;
 }
 .rt-bar button:hover {
-  background: #333747;
+  background: var(--ctl-on);
 }
 .rt-color input[type='color'] {
   width: 26px;
@@ -2583,7 +2690,7 @@ button {
   bottom: -5px;
   width: 8px;
   height: 8px;
-  background: #23262f;
+  background: var(--ctl);
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   transform: translateX(-50%) rotate(45deg);
@@ -2616,7 +2723,7 @@ button {
   width: 3.2rem;
   font: inherit;
   font-size: 0.76rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: 4px;
@@ -2656,7 +2763,7 @@ button {
   padding: 4px;
   list-style: none;
   min-width: 190px;
-  background: #23262f;
+  background: var(--ctl);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55);
@@ -2764,7 +2871,7 @@ button {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #4a4d5c;
+  background: var(--line-3);
   flex: none;
 }
 .col-chip.on .col-dot {
@@ -2842,17 +2949,17 @@ button {
 .cn-head button.ok {
   background: var(--ok);
   border-color: var(--ok);
-  color: #0d1f16;
+  color: var(--on-ok);
 }
 .cn-row code {
   display: block;
   margin: 5px 0 4px;
   padding: 5px 8px;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 5px;
   font-size: 0.74rem;
-  color: #9ec0ff;
+  color: var(--accent-text);
   user-select: all;
   overflow-wrap: anywhere;
 }
@@ -2903,7 +3010,7 @@ button {
 .cn-keys kbd {
   font: inherit;
   font-size: 0.72rem;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-bottom-width: 2px;
   border-radius: 4px;
@@ -2928,7 +3035,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px 11px 11px;
-  background: rgba(255, 255, 255, 0.015);
+  background: var(--tint);
 }
 .au-sec h4 {
   margin: 0 0 8px;
@@ -3001,7 +3108,7 @@ button {
   height: 17px;
   padding: 0 4px;
   border-radius: 4px;
-  background: #101118;
+  background: var(--sunken);
   border: 1px solid var(--line);
   color: var(--dim);
   font-size: 0.68rem;
@@ -3010,7 +3117,7 @@ button {
 }
 .lay-turn.fixed {
   border-color: var(--accent);
-  color: #9ec0ff;
+  color: var(--accent-text);
 }
 .turn-row {
   display: flex;
@@ -3137,6 +3244,36 @@ button {
   align-self: center;
   flex: none;
 }
+/*
+ * 마크는 알파가 살아 있는 **흰 실루엣**이다. invert 를 걸면 흰 부분만 검어지고
+ * 투명한 곳은 그대로라, 밝은 테마용 그림을 따로 만들 필요가 없다.
+ * 1 이 아니라 0.9 인 이유: 완전한 검정은 옆 글자(--text)보다 진해 혼자 튄다.
+ */
+:root[data-theme='light'] .brand-mark {
+  filter: invert(0.9);
+}
+
+/* 테마 단추 — 머리말 오른쪽 끝, 탭보다 조용해야 한다 */
+.theme-btn {
+  flex: none;
+  align-self: center;
+  margin-left: 0.5rem;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.theme-btn:hover {
+  background: var(--ctl-hover);
+  border-color: var(--line);
+  color: var(--text);
+}
 @media (max-width: 780px) {
   .brand-mark {
     height: 16px;
@@ -3150,7 +3287,7 @@ button {
   gap: 14px;
   padding: 12px 14px;
   margin-bottom: 1.1rem;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--tint-2);
   border: 1px solid var(--line);
   border-radius: 10px;
 }
@@ -3187,7 +3324,7 @@ button {
 .help-links button.ok {
   background: var(--ok);
   border-color: var(--ok);
-  color: #0d1f16;
+  color: var(--on-ok);
 }
 
 /* ══ 물어보기 창 ═══════════════════════════════════════════ */
@@ -3280,5 +3417,5 @@ button {
 .tile-stage.fx-stage {
   position: relative;
   overflow: hidden;
-  background: #0d0e13;
+  background: var(--void);
 }

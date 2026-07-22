@@ -8,7 +8,9 @@ import {
   createSlide,
   createText,
   deckDurationMs,
+  DEFAULT_MOTION,
   formatDuration,
+  groupMotion,
   newId,
   rankSlide,
   slideDurationMs,
@@ -18,7 +20,8 @@ import {
   type DeckAudio,
   type Frame,
   type Slide,
-  type SlideElement
+  type SlideElement,
+  type SlideGroup
 } from '@shared/deck'
 import { getEffect } from '@shared/effects'
 import { getScreenEffect, type ScreenFx } from '@shared/screen-fx'
@@ -130,7 +133,11 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   const [previewing, setPreviewing] = useState(false)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** 앱 안에서만 쓰는 오려두기 보관함. 슬라이드를 넘나들며 붙여넣을 수 있다. */
-  const clipboard = useRef<SlideElement[]>([])
+  /** 요소만 담으면 다른 장에 붙일 때 묶음 이름·효과가 사라진다 — 정의를 같이 들고 다닌다 */
+  const clipboard = useRef<{ elements: SlideElement[]; groups: Record<string, SlideGroup> }>({
+    elements: [],
+    groups: {}
+  })
   /** 스냅이 붙은 기준선 — 끌고 있는 동안만 보인다 */
   const [guides, setGuides] = useState<Guide[]>([])
   /** 캔버스에서 바로 고치는 중인 텍스트 요소 */
@@ -647,8 +654,40 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     })
   }
 
+  /** 묶음 설정 한 조각만 갈아끼운다. 이름을 고칠 때 효과가 날아가면 안 된다. */
+  function patchGroup(gid: string, p: Partial<SlideGroup>): void {
+    const cur = slide!.groups?.[gid] ?? { name: '' }
+    patchSlide(slideIdx, { groups: { ...(slide!.groups ?? {}), [gid]: { ...cur, ...p } } })
+  }
+
   function renameGroup(gid: string, name: string): void {
-    patchSlide(slideIdx, { groups: { ...(slide!.groups ?? {}), [gid]: { name } } })
+    patchGroup(gid, { name })
+  }
+
+  /**
+   * 효과를 **묶음 자체**에 건다.
+   *
+   * 요소에 거는 것과 같은 규칙(등장·강조·퇴장이 서로를 덮지 않는다)을 쓰되,
+   * 대상이 덩어리를 감싼 상자다 — 안의 요소 효과는 그대로 남는다.
+   */
+  function applyGroupEffect(gid: string, effectId: string): void {
+    const e = getEffect(effectId)
+    const m = groupMotion(slide!, gid) ?? { ...DEFAULT_MOTION }
+
+    if (e.category === 'emphasis') {
+      patchGroup(gid, { motion: { ...m, loop: e.id, loopDurationMs: e.defaultDurationMs } })
+    } else if (e.category === 'out') {
+      patchGroup(gid, { motion: { ...m, exit: e.id, exitDurationMs: e.defaultDurationMs } })
+    } else {
+      patchGroup(gid, {
+        motion: {
+          ...m,
+          preset: e.id,
+          durationMs: e.defaultDurationMs,
+          easing: e.defaultEasing
+        }
+      })
+    }
   }
 
   /** 이미 한 묶음이면 풀고, 아니면 묶는다. Ctrl+G 하나로 왕복한다. */
@@ -675,9 +714,13 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
    * 요소를 새 id 로 복제한다.
    * 그룹은 **새 그룹 id 로 다시 묶어** 원본과 섞이지 않게 한다.
    */
-  function cloneElements(src: SlideElement[], offset: number): SlideElement[] {
+  function cloneElements(
+    src: SlideElement[],
+    offset: number,
+    srcGroups: Record<string, SlideGroup> = slide!.groups ?? {}
+  ): { elements: SlideElement[]; groups: Record<string, SlideGroup> } {
     const gidMap = new Map<string, string>()
-    return src.map((e) => {
+    const elements = src.map((e) => {
       let gid = e.groupId ?? null
       if (gid) {
         if (!gidMap.has(gid)) gidMap.set(gid, newId('g'))
@@ -690,6 +733,14 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
         frame: { ...e.frame, x: e.frame.x + offset, y: e.frame.y + offset }
       }
     })
+
+    // 이름·묶음 효과도 함께 복제한다 — 안 그러면 복사본만 이름 없는 맨 묶음이 된다
+    const groups: Record<string, SlideGroup> = {}
+    for (const [from, to] of gidMap) {
+      const g = srcGroups[from]
+      if (g) groups[to] = structuredClone(g)
+    }
+    return { elements, groups }
   }
 
   /**
@@ -704,8 +755,11 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
       slide!.elements.filter((e) => ids.includes(e.id)),
       offset
     )
-    patchSlide(slideIdx, { elements: [...slide!.elements, ...copies] })
-    setSelected(copies.map((c) => c.id))
+    patchSlide(slideIdx, {
+      elements: [...slide!.elements, ...copies.elements],
+      groups: { ...(slide!.groups ?? {}), ...copies.groups }
+    })
+    setSelected(copies.elements.map((c) => c.id))
   }
 
   /**
@@ -769,9 +823,15 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
 
   function copySelected(): void {
     if (selected.length === 0) return
-    clipboard.current = slide!.elements
+    const elements = slide!.elements
       .filter((e) => selected.includes(e.id))
       .map((e) => structuredClone(e))
+    const groups: Record<string, SlideGroup> = {}
+    for (const e of elements) {
+      const g = e.groupId ? slide!.groups?.[e.groupId] : null
+      if (g && e.groupId) groups[e.groupId] = structuredClone(g)
+    }
+    clipboard.current = { elements, groups }
   }
 
   function cutSelected(): void {
@@ -784,12 +844,16 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
    * **같은 슬라이드면 살짝 어긋나게**(가려지지 않게), 다른 슬라이드면 원래 자리 그대로.
    */
   function pasteClipboard(): void {
-    if (clipboard.current.length === 0) return
+    const { elements, groups } = clipboard.current
+    if (elements.length === 0) return
     const here = new Set(slide!.elements.map((e) => e.id))
-    const sameSlide = clipboard.current.some((e) => here.has(e.id))
-    const copies = cloneElements(clipboard.current, sameSlide ? 3 : 0)
-    patchSlide(slideIdx, { elements: [...slide!.elements, ...copies] })
-    setSelected(copies.map((c) => c.id))
+    const sameSlide = elements.some((e) => here.has(e.id))
+    const copies = cloneElements(elements, sameSlide ? 3 : 0, groups)
+    patchSlide(slideIdx, {
+      elements: [...slide!.elements, ...copies.elements],
+      groups: { ...(slide!.groups ?? {}), ...copies.groups }
+    })
+    setSelected(copies.elements.map((c) => c.id))
   }
 
   /** 순위 목록 하나를 1·2·3등 개별 요소로 나눈다. */
@@ -889,7 +953,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
         {
           label: '붙여넣기',
           hint: 'Ctrl+V',
-          disabled: clipboard.current.length === 0,
+          disabled: clipboard.current.elements.length === 0,
           onClick: pasteClipboard
         },
         {
@@ -918,7 +982,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
       {
         label: '붙여넣기',
         hint: 'Ctrl+V',
-        disabled: clipboard.current.length === 0,
+        disabled: clipboard.current.elements.length === 0,
         onClick: pasteClipboard
       },
       { label: '제자리 복제', hint: 'Ctrl+J', onClick: () => duplicateSelected(0) },
@@ -1010,6 +1074,17 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   async function pickImage(id: string): Promise<void> {
     const asset = await window.endcredit.assets.pickImage()
     if (asset) patchElements([id], { src: asset.url } as Partial<SlideElement>)
+  }
+
+  async function pickBackground(): Promise<void> {
+    const asset = await window.endcredit.assets.pickImage()
+    if (asset) patchSlide(slideIdx, { background: { ...slide!.background, image: asset.url } })
+  }
+
+  /** 배경을 모든 장에 똑같이. 장마다 파일을 고르게 하면 열 장짜리 크레딧이 고역이다. */
+  function applyBackgroundToAll(): void {
+    const bg = { ...slide!.background }
+    update({ ...deck!, slides: deck!.slides.map((s) => ({ ...s, background: { ...bg } })) })
   }
 
   async function addImage(): Promise<void> {
@@ -1456,6 +1531,10 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
           onGroup={toggleGroup}
           onUngroup={ungroupSelected}
           onRenameGroup={renameGroup}
+          onPatchGroup={patchGroup}
+          onDropGroupEffect={applyGroupEffect}
+          onPickBackground={pickBackground}
+          onApplyBackgroundToAll={applyBackgroundToAll}
           onScreenFx={(fx: ScreenFx | null) => patchSlide(slideIdx, { screen: fx })}
           data={info.data}
         />

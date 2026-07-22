@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
+import { useOutsideClose } from './useOutsideClose'
 
 /**
  * 오른쪽 클릭 메뉴.
@@ -29,7 +30,23 @@ export function ContextMenu({
   items: MenuItem[]
   onClose: () => void
 }): React.JSX.Element {
-  const ref = useRef<HTMLUListElement>(null)
+  /**
+   * 바깥 클릭은 **document 의 capture 단계**로 받는다.
+   *
+   * 예전에는 window 에 거품 단계로 붙였는데, 캔버스를 왼쪽 클릭하면 메뉴가 안 닫혔다.
+   * 순서를 따라가면 이렇다:
+   *
+   *   1. pointerdown 이 리액트 루트에 닿아 캔버스 핸들러가 setSelected([]) 를 부른다
+   *   2. pointerdown 은 **즉시 처리되는 이벤트**라 리액트가 그 자리에서 다시 그린다
+   *   3. onClose 가 매번 새로 만들어지는 화살표 함수여서 이 효과가 통째로 재실행된다
+   *      → 정리 단계에서 window 의 pointerdown 청취를 **떼어낸다**
+   *   4. 그제서야 네이티브 이벤트가 window 에 도착한다 — 들을 사람이 없다
+   *
+   * 캔버스 밖(다시 그리지 않는 패널)을 누를 때만 닫혔던 이유가 이것이다.
+   * useOutsideClose 는 onClose 를 ref 에 담아 열림 여부에만 반응하므로 다시 그려도
+   * 청취가 끊기지 않고, capture 단계라 리액트 핸들러보다 **먼저** 실행된다.
+   */
+  const ref = useOutsideClose<HTMLUListElement>(true, onClose)
   const [pos, setPos] = useState({ x, y })
 
   // 화면 밖으로 나가면 안쪽으로 당긴다 — 캔버스 오른쪽 끝에서 열면 잘린다
@@ -42,23 +59,11 @@ export function ContextMenu({
     setPos({ x: Math.max(4, nx), y: Math.max(4, ny) })
   }, [x, y])
 
+  // 화면을 굴리면 메뉴만 제자리에 남는다 — 같이 닫는다 (바깥 클릭은 위에서 처리)
   useEffect(() => {
     const close = (): void => onClose()
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    // 다음 tick 부터 듣는다 — 메뉴를 연 그 클릭이 곧바로 닫아버리지 않게
-    const t = setTimeout(() => {
-      window.addEventListener('pointerdown', close)
-      window.addEventListener('wheel', close, { passive: true })
-    }, 0)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      clearTimeout(t)
-      window.removeEventListener('pointerdown', close)
-      window.removeEventListener('wheel', close)
-      window.removeEventListener('keydown', onKey)
-    }
+    window.addEventListener('wheel', close, { passive: true, capture: true })
+    return () => window.removeEventListener('wheel', close, { capture: true })
   }, [onClose])
 
   return (
