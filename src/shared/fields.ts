@@ -56,6 +56,12 @@ export function allFields(maxRank = 10): Field[] {
   }
 
   out.push(
+    { token: 'now.year', label: '년', group: '날짜·시각' },
+    { token: 'now.month', label: '월', group: '날짜·시각' },
+    { token: 'now.day', label: '일', group: '날짜·시각' },
+    { token: 'now.hour', label: '시 (00~23)', group: '날짜·시각' },
+    { token: 'now.minute', label: '분 (00~59)', group: '날짜·시각' },
+
     { token: 'total.messages', label: '전체 채팅 수', group: '합계' },
     { token: 'total.chatters', label: '채팅 참여자 수', group: '합계' },
     { token: 'total.emoticons', label: '전체 이모티콘 수', group: '합계' },
@@ -85,6 +91,36 @@ function formatDuration(ms: number): string {
   return h > 0 ? `${h}시간 ${m}분` : `${m}분`
 }
 
+/**
+ * 지금 시각.
+ *
+ * 이것만 방송 데이터가 아니라 **그리는 순간의 시계**에서 온다. "2026년 7월 26일 방송"
+ * 같은 문구를 크레딧에 박으려면 필요한데 집계 데이터에는 그런 게 없다.
+ * 크레딧이 돌아가는 도중에 분이 바뀌어도 다시 그려지지 않는 한 그대로다 —
+ * '크레딧을 튼 시각'이라고 보면 된다.
+ *
+ * 시·분만 두 자리로 채운다. `{now.hour}:{now.minute}` 가 `21:5` 로 나오면 못 쓰기 때문이다.
+ * 년·월·일은 채우지 않는다 — `07월 26일` 보다 `7월 26일` 이 자연스럽다.
+ */
+function resolveNow(part: string | undefined): string | null {
+  const d = new Date()
+  const p2 = (n: number): string => String(n).padStart(2, '0')
+  switch (part) {
+    case 'year':
+      return String(d.getFullYear())
+    case 'month':
+      return String(d.getMonth() + 1)
+    case 'day':
+      return String(d.getDate())
+    case 'hour':
+      return p2(d.getHours())
+    case 'minute':
+      return p2(d.getMinutes())
+    default:
+      return null
+  }
+}
+
 const RANK_UNIT: Record<string, string> = {
   chatRank: '회',
   emoticonRank: '개',
@@ -97,6 +133,8 @@ const RANK_UNIT: Record<string, string> = {
 export function resolveField(token: string, data: CreditData): string | null {
   const parts = token.split('.')
   const d = data as unknown as Record<string, unknown>
+
+  if (parts[0] === 'now') return resolveNow(parts[1])
 
   if (parts[0] === 'total') {
     if (parts[1] === 'duration') return formatDuration(data.totals.durationMs)

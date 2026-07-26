@@ -1,4 +1,6 @@
 import type { CreditData } from './aggregate'
+// 타입만 가져온다 — deck.ts 가 이 파일의 값을 쓰므로 값을 가져오면 순환이 된다
+import type { AudioClip } from './deck'
 
 /**
  * 엔딩크레딧 프리셋 — 저장·공유되는 단위.
@@ -39,6 +41,13 @@ export interface Motion {
   /** 강조 효과 1회 길이 */
   loopDurationMs: number
   /**
+   * 강조 효과 세기 (%, 100 = 기본).
+   *
+   * 효과 키프레임이 `--fx-amp` 를 곱해 쓰도록 적혀 있어서, 이 값 하나로 흔들리는 폭·
+   * 커지는 정도가 함께 조절된다. 예전 문서에는 없으므로 선택 항목이다.
+   */
+  loopAmp?: number
+  /**
    * 장이 끝나기 직전에 사라지는 효과 (없으면 null).
    *
    * 등장과 **따로** 두는 이유: 하나의 목록에 섞으면 "왼쪽에서 들어와 오른쪽으로 나간다"를
@@ -53,6 +62,15 @@ export interface Motion {
    * 조합이 목록만으로는 불가능하다. 그 둘을 떼어내기 위한 값이다.
    */
   order?: number
+  /**
+   * **등장하는 순간** 울리는 효과음 (없으면 null).
+   *
+   * 장 전체의 효과음(`slide.sound`)과 다르다. 이건 요소 하나가 나타날 때다 —
+   * 1등이 뽀잉 튀어나올 때 '띵', 기차가 들어올 때 '칙칙폭폭' 같은 것.
+   * 묶음도 같은 `Motion` 을 쓰므로 **덩어리가 등장할 때 한 번** 울리게도 된다.
+   * 등장 지연을 그대로 따라가서 화면과 소리가 어긋나지 않는다.
+   */
+  sound?: AudioClip | null
 }
 
 export interface SectionStyle {

@@ -1,27 +1,4 @@
-const { existsSync, readFileSync } = require('node:fs')
-
-/**
- * 설치 파일 이름에 쓸 버전 이름.
- *
- * 화면에 보이는 버전(`VERSION_LABEL`)과 파일 이름이 어긋나면 어느 게 최신인지 헷갈린다.
- * 한 곳(`src/shared/constants.ts`)만 고치면 둘 다 따라오게 한다.
- *   'v.BETA' → 'beta',  'v.1.0' → '1.0'
- */
-function versionLabel() {
-  try {
-    const src = readFileSync('src/shared/constants.ts', 'utf8')
-    const m = /VERSION_LABEL\s*=\s*['"]([^'"]+)['"]/.exec(src)
-    if (m) {
-      const label = m[1].replace(/^v\.?/i, '').trim().toLowerCase().replace(/\s+/g, '-')
-      if (label) return label
-    }
-  } catch {
-    /* 못 읽으면 package.json 의 버전을 쓴다 */
-  }
-  return null
-}
-
-const LABEL = versionLabel()
+const { existsSync } = require('node:fs')
 
 /**
  * 설치 파일 만들기 설정.
@@ -79,11 +56,23 @@ module.exports = {
   // 빌드 결과와 package.json 만 담는다 — src 나 brand 원본까지 들어갈 이유가 없다
   files: ['out/**/*', 'package.json', '!**/*.map'],
 
+  /**
+   * 자동 업데이트가 볼 곳.
+   *
+   * 이 설정이 있어야 electron-builder 가 **`latest.yml`** 을 함께 만들어 릴리스에 올린다.
+   * 앱은 그 파일 하나만 보고 새 버전인지 판단하므로, 이게 빠지면 설치 파일을 아무리
+   * 올려도 자동 업데이트는 영영 아무것도 못 찾는다.
+   *
+   * `npm run release` 로 올린다 (`GH_TOKEN` 필요). 저장소가 공개라 **받는 쪽은** 토큰이 필요 없다.
+   */
+  publish: [{ provider: 'github', owner: 'Redater2254', repo: 'endcredit' }],
+
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
     icon: 'build/icon.ico',
     // 서명하지 않으면 SmartScreen 이 처음 몇 번 경고를 띄운다 (인증서가 있으면 여기에 넣는다)
-    artifactName: LABEL ? '${productName}-' + LABEL + '-setup.${ext}' : '${productName}-${version}-setup.${ext}'
+    // 파일명에 버전을 박는다 — latest.yml 이 가리키는 이름과 같아야 업데이트가 파일을 찾는다
+    artifactName: '${productName}-${version}-setup.${ext}'
   },
 
   nsis: {
@@ -100,5 +89,10 @@ module.exports = {
     language: '1042',
     deleteAppDataOnUninstall: false,
     uninstallDisplayName: 'endcredit'
+    /*
+     * 업데이트 설치는 여기 손댈 것이 없다. `oneClick: false` 라 **처음 설치할 때만**
+     * 경로 고르는 화면이 나오고, 자동 업데이트는 설치 파일을 조용히(`/S`) 돌린다.
+     * `perMachine: false` 라 관리자 권한 창도 안 뜬다.
+     */
   }
 }

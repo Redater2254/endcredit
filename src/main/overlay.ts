@@ -31,6 +31,8 @@ export function onOverlayChanged(fn: () => void): void {
 let deck: Deck | null = null
 let playing = false
 let generation = 0
+/** 한 장만 내보내는 중이면 그 번호. 멈추면 반드시 지운다 — 다음 재생이 한 장만 나가면 사고다 */
+let onlySlide: number | null = null
 /** 샘플 데이터 모드 — 실제 시청자 없이 디자인을 확인하기 위한 것. 항상 UI 에 표시된다. */
 let useSample = false
 
@@ -40,6 +42,7 @@ function state(): OverlayState {
     data: useSample ? sampleCreditData() : creditSnapshot(),
     playing,
     generation,
+    onlySlide,
     sample: useSample
   }
 }
@@ -98,8 +101,15 @@ export function overlayClientCount(): number {
   return clients.size
 }
 
-export function playOverlay(): void {
+/**
+ * 재생 시작. `only` 를 주면 그 장 하나만 내보낸다.
+ *
+ * 안 주면 **반드시 전체로 되돌린다** — 한 장만 틀어본 다음 전역 단축키로 방송에 틀었는데
+ * 그 한 장만 나가는 게 최악의 사고다. 그래서 기본값이 '전체'이고, 한 장은 매번 지정해야 한다.
+ */
+export function playOverlay(only: number | null = null): void {
   playing = true
+  onlySlide = only
   generation += 1
   broadcast()
 }
@@ -116,6 +126,7 @@ export function togglePlay(): void {
 
 export function stopOverlay(): void {
   playing = false
+  onlySlide = null
   broadcast()
 }
 
@@ -129,10 +140,12 @@ export function stopOverlay(): void {
 export function finishOverlay(gen: number): boolean {
   if (!playing || gen !== generation) return false
   playing = false
+  onlySlide = null
   broadcast()
   return true
 }
 
+/** 처음부터 다시. 한 장만 틀던 중이면 그 한 장을 다시 튼다 (보고 있던 것이 바뀌면 안 된다) */
 export function restartOverlay(): void {
   playing = true
   generation += 1

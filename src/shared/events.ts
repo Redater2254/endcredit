@@ -1,7 +1,11 @@
 /**
  * SOOP Chat SDK 가 실제로 방출하는 action 목록.
- * sooplive-chat-sdk.js 를 해부해 `action:"..."` 로 실제 생성되는 것만 추렸다 (2026-07-21).
- * 문서에 없는 것도 있으므로, 여기 없는 action 이 들어와도 버리지 말고 로그에 남긴다.
+ * sooplive-chat-sdk.js 를 해부해 실제로 생성되는 것만 추렸다 (2026-07-26 재확인).
+ *
+ * 처음엔 `action:"..."` 만 훑어서 6개를 통째로 놓쳤다. **미션 계열은 이름을 변수에 담아
+ * `return {action: _}` 로 돌려주기 때문에** 그 방식으로는 절대 안 잡힌다. 아래는 두 형태를
+ * 모두 훑은 결과다. 문서에 없는 것도 있으므로, 여기 없는 action 이 들어와도 버리지 말고
+ * 로그에 남긴다.
  */
 export const KNOWN_ACTIONS = [
   'MESSAGE',
@@ -13,6 +17,15 @@ export const KNOWN_ACTIONS = [
   'STICKER_GIFTED',
   'OGQ_EMOTICON_GIFTED',
   'GEM_GIFTED',
+  // 도전미션 — 참여(별풍선) · 정산 · 종료 · 정산 시점의 후원자 명단
+  'CHALLENGE_MISSION_GIFTED',
+  'CHALLENGE_MISSION_SETTLED',
+  'CHALLENGE_MISSION_FINISHED',
+  'CHALLENGE_MISSION_SPONSORS',
+  // 대결미션 — 참여(별풍선) · 정산 · 승패
+  'BATTLE_MISSION_GIFTED',
+  'BATTLE_MISSION_SETTLED',
+  'BATTLE_MISSION_FINISHED',
   'SUBSCRIBED',
   'SUBSCRIPTION_GIFTED',
   'SUBSCRIPTION_RENEWED',
@@ -23,18 +36,27 @@ export const KNOWN_ACTIONS = [
   'USERSTATUS_CHANGED',
   'ADMINSTATUS_CHANGED',
   'NICKNAME_CHANGED',
+  'MANAGER_LIST_CHANGED',
   'CHAT_MUTED',
   'BANNED',
   'BAN_REVOKED',
   'BANNED_USER_LIST',
+  'BANNED_WORDS',
+  'BAN_MESSAGE_STATE',
   'MANAGER_APPOINTMENT',
   'SLOW_MODE',
   'CHAT_FREEZE',
   'POLL',
-  'NOTICE',
   'BJ_NOTICE',
   'ADMIN_NOTICE',
   'BREAK_TIME',
+  'LIVE_CAPTION',
+  'TRANSLATION',
+  'TRANSLATION_STATE',
+  'MOBILE_BROAD_STATUS',
+  'VR',
+  'LOGIN',
+  'IN',
   'JOIN',
   'OUT',
   'QUIT'
@@ -46,6 +68,8 @@ export const AGGREGATED_ACTIONS = new Set([
   'BALLOON_GIFTED',
   'ADBALLOON_GIFTED',
   'VIDEOBALLOON_GIFTED',
+  'CHALLENGE_MISSION_GIFTED',
+  'BATTLE_MISSION_GIFTED',
   'STICKER_GIFTED',
   'OGQ_EMOTICON_GIFTED',
   'SUBSCRIBED',

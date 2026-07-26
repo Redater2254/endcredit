@@ -4,6 +4,7 @@ import { app, dialog } from 'electron'
 import { defaultDeck, type Deck } from '@shared/deck'
 import { toDeck } from '@shared/migrate'
 import { assetUrlPattern, readAssetBytes, storeAssetBytes } from './assets'
+import { lastDir, rememberDir } from './settings'
 import { unzipSync, zipSync, type ZipEntry } from './zip'
 
 /**
@@ -136,12 +137,15 @@ export interface ExportResult {
 
 export async function exportPreset(deck: Deck): Promise<ExportResult | null> {
   const suggested = `${safeName(deck.name || '내 프리셋')}.${EXPORT_EXT}`
+  const dir = lastDir('preset')
   const picked = await dialog.showSaveDialog({
     title: '프리셋 내보내기',
-    defaultPath: suggested,
+    // 지난번에 내보낸 폴더에서 시작한다. 파일 이름은 언제나 새로 제안한다
+    defaultPath: dir ? join(dir, suggested) : suggested,
     filters: [{ name: 'endcredit 프리셋', extensions: [EXPORT_EXT] }]
   })
   if (picked.canceled || !picked.filePath) return null
+  rememberDir('preset', picked.filePath)
 
   const entries: ZipEntry[] = [
     { name: DECK_ENTRY, data: Buffer.from(JSON.stringify(deck, null, 2), 'utf8') },
@@ -182,6 +186,7 @@ export interface ImportResult {
 export async function importPreset(): Promise<ImportResult | null> {
   const picked = await dialog.showOpenDialog({
     title: '프리셋 가져오기',
+    defaultPath: lastDir('preset'),
     properties: ['openFile'],
     filters: [
       { name: 'endcredit 프리셋', extensions: [EXPORT_EXT, 'zip'] },
@@ -190,6 +195,7 @@ export async function importPreset(): Promise<ImportResult | null> {
   })
   if (picked.canceled || picked.filePaths.length === 0) return null
   const src = picked.filePaths[0]
+  rememberDir('preset', src)
 
   // JSON 하나만 받은 경우도 받아준다 — 에셋이 없을 뿐 못 읽을 이유가 없다
   if (src.toLowerCase().endsWith('.json')) {

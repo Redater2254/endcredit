@@ -35,3 +35,22 @@ export interface ServerStatus {
   overlayUrl: string
   error: string | null
 }
+
+/**
+ * 자동 업데이트 상태. 문구는 렌더러가 만든다 — 메인은 사실만 알린다.
+ *
+ * 받는 것은 사용자가 `받기` 를 눌러야 시작하고(`available` → `downloading`),
+ * 설치는 **앱을 끌 때** 조용히 이뤄진다(`ready` 에서 더 나아가지 않는다).
+ */
+export type UpdateState =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  /** 최신 버전을 쓰는 중 */
+  | { kind: 'current' }
+  /** 새 버전이 있다 — 받을지는 사용자가 정한다 */
+  | { kind: 'available'; version: string; notes: string | null }
+  | { kind: 'downloading'; version: string; percent: number }
+  /** 다 받았다. 앱을 끄면 설치된다 */
+  | { kind: 'ready'; version: string }
+  /** 확인·다운로드 실패. 릴리스 페이지를 여는 길만 열어주면 손으로 받으면 된다 */
+  | { kind: 'error'; message: string }

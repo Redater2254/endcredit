@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createRoot } from 'react-dom/client'
 import { DeckRenderer } from '@shared/DeckRenderer'
 import {
   createData,
@@ -7,15 +8,23 @@ import {
   createShape,
   createSlide,
   createText,
-  deckDurationMs,
+  createTrain,
   DEFAULT_MOTION,
+  delaysFor,
+  docSlide,
   effectsOf,
   formatDuration,
   groupMotion,
+  makeSmart,
   newId,
   rankSlide,
+  resizeDeckCanvas,
   slideDurationMs,
   slideHeightRatio,
+  smartInstances,
+  smartsOf,
+  smartUses,
+  unpackSmart,
   type AudioClip,
   type Deck,
   type DeckAudio,
@@ -23,18 +32,20 @@ import {
   type Motion,
   type Slide,
   type SlideElement,
-  type SlideGroup
+  type ShapeElement,
+  type SlideGroup,
+  type SmartDoc
 } from '@shared/deck'
 import { getEffect } from '@shared/effects'
 import { getScreenEffect, type ScreenFx } from '@shared/screen-fx'
 import type { OverlayInfo } from '@shared/overlay'
-import { EffectLibrary, SCREEN_FX_DRAG_TYPE } from './EffectLibrary'
+import { EffectLibrary, SCREEN_FX_DRAG_TYPE, SPECIAL_DRAG_TYPE } from './EffectLibrary'
 import { EffectEditor } from './EffectEditor'
 import { newCustomEffect, normalize, type CustomEffect } from '@shared/custom-effect'
 import { CustomEffectStyles } from '@shared/useCustomEffects'
 import { FieldPanel, FIELD_DRAG_TYPE } from './FieldPanel'
 import { SlidePanel } from './SlidePanel'
-import { Inspector } from './Inspector'
+import { Inspector, type LayerCmd } from './Inspector'
 import { SelectionBox } from './SelectionBox'
 import { MultiSelectionBox, boundingBox } from './MultiSelectionBox'
 import { useCanvasNav } from './useCanvasNav'
@@ -56,6 +67,34 @@ import { useDialog } from './Dialog'
  *   좌: 슬라이드 썸네일 · 중: 캔버스 · 우: 요소 목록 + 속성 · 하: 효과 라이브러리
  */
 
+/** 캔버스에서 마우스가 무엇을 하는지. `draw` 는 도형을 끌어 그리는 중. */
+type Tool = 'move' | 'lasso' | 'draw'
+
+/** 캔버스에 끌어다 놓을 수 있는 그림 파일 (main 의 `IMAGE_EXTS` 와 같아야 한다) */
+const IMAGE_DROP = /\.(png|jpe?g|gif|webp|svg|apng)$/i
+
+/**
+ * 그림의 원래 가로:세로.
+ *
+ * 놓자마자 상자를 비율대로 잡아주려면 실제 크기를 알아야 한다. 못 읽으면 4:3 으로 둔다
+ * — 파일 하나 때문에 놓기가 통째로 실패하는 것보다 낫다.
+ */
+function imageRatio(url: string): Promise<number> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve(img.naturalWidth / Math.max(1, img.naturalHeight))
+    img.onerror = () => resolve(4 / 3)
+    img.src = url
+  })
+}
+
+/** 도형 도구가 그릴 수 있는 종류 (도구 막대 · 단축키 R 로 돌려가며 고른다) */
+const SHAPE_KINDS: { value: ShapeElement['shape']; label: string; icon: string }[] = [
+  { value: 'rect', label: '사각형', icon: '▭' },
+  { value: 'ellipse', label: '타원', icon: '◯' },
+  { value: 'line', label: '선', icon: '━' }
+]
+
 /** 요소에서 사람이 읽을 이름을 뽑는다. 슬라이드 이름으로 쓴다. */
 function elementTitle(el: SlideElement): string {
   if (el.kind === 'data') return el.title || el.name
@@ -63,6 +102,51 @@ function elementTitle(el: SlideElement): string {
   if (el.kind === 'rank') return `${el.rank}등`
   if (el.kind === 'image') return '이미지'
   return el.name
+}
+
+/**
+ * 병합할 때 요소 안의 `<img>` 를 data URL 로 바꿔 넣는다.
+ *
+ * SVG(foreignObject)를 이미지로 그릴 때, 그 안의 **외부 주소 이미지는 로드되지 않는다**
+ * (보안상). 미리 같은-출처(localhost)에서 받아 data URL 로 심어야 그림에 찍힌다.
+ */
+async function inlineImages(node: HTMLElement): Promise<void> {
+  const imgs = Array.from(node.querySelectorAll('img'))
+  await Promise.all(
+    imgs.map(async (img) => {
+      const src = img.getAttribute('src')
+      if (!src || src.startsWith('data:')) return
+      try {
+        const res = await fetch(src)
+        const blob = await res.blob()
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const fr = new FileReader()
+          fr.onload = () => resolve(fr.result as string)
+          fr.onerror = reject
+          fr.readAsDataURL(blob)
+        })
+        img.setAttribute('src', dataUrl)
+      } catch {
+        /* 못 받으면 그 이미지는 빈 채로 둔다 — 병합 자체는 계속 진행한다 */
+      }
+    })
+  )
+}
+
+/** 점이 다각형 안에 있는지 — 올가미 선택 판정 (표준 광선 투사). */
+function pointInPolygon(
+  p: { x: number; y: number },
+  poly: { x: number; y: number }[]
+): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i]
+    const b = poly[j]
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside
+    }
+  }
+  return inside
 }
 
 /** 등수로 쪼갤 수 있는 데이터 소스 */
@@ -164,8 +248,38 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   const [gallery, setGallery] = useState(false)
   /** 오른쪽 클릭 메뉴 */
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  /** 효과만 따로 복사해 다른 레이어에 붙이는 보관함 (포토샵 '레이어 스타일 붙여넣기'). */
+  const [effectClip, setEffectClip] = useState<Motion | null>(null)
   /** 빈 곳을 끌어 범위로 잡기 (캔버스 % 좌표) */
   const [marquee, setMarquee] = useState<Frame | null>(null)
+  /**
+   * 현재 도구. 올가미(L)·도형(R)은 손도구(Space)와 달리 **눌러서 유지되는 모드**다 —
+   * 포토샵처럼 도구를 골라두면 다음 도구를 고를 때까지 그대로다.
+   * 다만 도형은 하나 그리고 나면 이동으로 돌아온다 (파워포인트·피그마와 같다).
+   */
+  const [tool, setTool] = useState<Tool>('move')
+  /** 도형 도구가 그릴 종류. 도구를 켜 둔 동안 도구 막대에서 바꾼다 */
+  const [drawKind, setDrawKind] = useState<ShapeElement['shape']>('rect')
+  /** 도형을 끌어 그리는 중인 상자 (캔버스 % 좌표) */
+  const [drawBox, setDrawBox] = useState<Frame | null>(null)
+  /** 탐색기에서 끌어온 파일이 캔버스 위에 떠 있는지 — 놓을 자리를 눈으로 알려준다 */
+  const [fileOver, setFileOver] = useState(false)
+  /**
+   * 파고든 고급 개체들 (docId). 비어 있으면 슬라이드를 편집 중이다.
+   *
+   * 포토샵이 고급 개체를 두 번 누르면 별도 문서로 여는 것과 같다. 여기서는 같은 창에서
+   * 캔버스만 그 개체의 캔버스로 통째로 바꾼다 — 툴바·요소칸·속성·효과가 그대로 쓰인다.
+   */
+  const [editPath, setEditPath] = useState<string[]>([])
+  /**
+   * 타임라인에서 찍어 본 시점 (크레딧 전체 기준 ms). null 이면 평소 편집 상태다.
+   *
+   * 3분짜리 크레딧에서 1분 40초 지점 효과 하나를 고치려고 매번 처음부터 재생하는 건
+   * 고문이다 — 프리미어처럼 아무 데나 찍어 그 순간을 세워 놓고 볼 수 있어야 한다.
+   */
+  const [seek, setSeek] = useState<number | null>(null)
+  /** 올가미로 그리는 중인 자유곡선 (캔버스 % 좌표). 그릴 때만 채워진다 */
+  const [lasso, setLasso] = useState<{ x: number; y: number }[] | null>(null)
 
   useEffect(() => {
     window.endcredit.overlay.getDeck().then((d) => {
@@ -310,12 +424,19 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     setSelected([])
   }, [applyDeck])
 
-  const cw = deck?.canvas.width ?? 1920
-  const ch = deck?.canvas.height ?? 1080
-  const slide = deck?.slides[slideIdx] ?? null
+  const realSlide = deck?.slides[slideIdx] ?? null
+  /** 격리 편집 중인 고급 개체 (가장 안쪽). 없으면 슬라이드를 편집 중이다. */
+  const doc = editPath.length > 0 ? (deck?.smarts?.[editPath[editPath.length - 1]] ?? null) : null
+  /**
+   * **지금 편집 중인 화면.** 슬라이드이거나 고급 개체 안쪽이다.
+   * 아래 편집 코드는 전부 이것만 본다 — 두 갈래로 나뉘면 반드시 어긋난다.
+   */
+  const slide = doc ? docSlide(doc) : realSlide
+  const cw = doc ? doc.canvas.width : (deck?.canvas.width ?? 1920)
+  const ch = doc ? doc.canvas.height : (deck?.canvas.height ?? 1080)
   // 만든 효과의 id·이름·분류만 모은 표식 — 키프레임까지 넣으면 손잡이를 끌 때마다 바뀐다
   const customStamp = (deck?.effects ?? []).map((f) => `${f.id}:${f.name}:${f.category}`).join('|')
-  const ratio = slide ? slideHeightRatio(slide) : 1
+  const ratio = doc ? 1 : slide ? slideHeightRatio(slide) : 1
 
   useLayoutEffect(() => {
     const area = areaRef.current
@@ -405,25 +526,44 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     help: () => void
     nudge: (key: string, big: boolean) => void
     newDeck: () => void
+    pickTool: (t: Tool) => void
+    /** 도형 도구 — 이미 켜져 있으면 다음 종류로 넘어간다 (포토샵의 Shift+도구와 같은 감각) */
+    shapeTool: () => void
+    merge: () => void
   } | null>(null)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       const a = document.activeElement
-      if (
-        a instanceof HTMLInputElement ||
+      /**
+       * 글자를 **치고 있는** 칸인지. 여기서는 브라우저의 원래 되돌리기가 맞다
+       * (친 글자만 되돌아간다). 색 칸의 16진수 입력도 글자 입력이라 여기 든다.
+       */
+      const typing =
         a instanceof HTMLTextAreaElement ||
+        Boolean((a as HTMLElement | null)?.isContentEditable) ||
+        (a instanceof HTMLInputElement &&
+          ['text', 'search', 'email', 'url', 'password'].includes(a.type))
+      /** 값 조절 칸(슬라이더·숫자·목록·체크·색) 안에 있는지 */
+      const inControl =
+        typing ||
+        a instanceof HTMLInputElement ||
         a instanceof HTMLSelectElement ||
-        (a as HTMLElement | null)?.isContentEditable
-      ) {
-        return
-      }
+        a instanceof HTMLTextAreaElement
+
       const ctrl = e.ctrlKey || e.metaKey
       const k = e.key.toLowerCase()
 
-      if (e.key === 'F1') {
+      /*
+       * 되돌리기·저장은 **속성창 안에서도** 통해야 한다.
+       * 슬라이더를 만진 직후가 제일 되돌리고 싶은 순간인데, 그때 초점이 슬라이더에
+       * 남아 있어 여태 Ctrl+Z 가 씹혔다. 슬라이더·목록·체크에는 브라우저의 되돌리기가
+       * 아무 일도 하지 않으므로 우리 것이 받는 게 맞다.
+       */
+      if (ctrl && (k === 'z' || k === 'y') && !typing) {
         e.preventDefault()
-        actionsRef.current?.help()
+        if (k === 'y' || e.shiftKey) actionsRef.current?.redo()
+        else actionsRef.current?.undo()
         return
       }
       if (ctrl && k === 's') {
@@ -432,20 +572,17 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
         else actionsRef.current?.save()
         return
       }
+
+      if (inControl) return
+
+      if (e.key === 'F1') {
+        e.preventDefault()
+        actionsRef.current?.help()
+        return
+      }
       if (ctrl && k === 'n') {
         e.preventDefault()
         actionsRef.current?.newDeck()
-        return
-      }
-      if (ctrl && k === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) actionsRef.current?.redo()
-        else actionsRef.current?.undo()
-        return
-      }
-      if (ctrl && k === 'y') {
-        e.preventDefault()
-        actionsRef.current?.redo()
         return
       }
 
@@ -475,9 +612,25 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
         e.preventDefault()
         // Ctrl+G 로 묶고, 묶인 상태에서 다시 누르면 풀린다
         actionsRef.current?.group()
+      } else if (ctrl && k === 'e') {
+        // 포토샵과 같은 단축키 — 선택을 한 장의 이미지로 병합
+        e.preventDefault()
+        actionsRef.current?.merge()
       } else if (ctrl && k === 'a') {
         e.preventDefault()
         actionsRef.current?.selectAll()
+      } else if (!ctrl && k === 'l') {
+        // 올가미 도구 (포토샵과 같은 단축키)
+        e.preventDefault()
+        actionsRef.current?.pickTool('lasso')
+      } else if (!ctrl && k === 'r') {
+        // 도형 도구 (피그마와 같은 단축키). 연달아 누르면 사각형 → 타원 → 선
+        e.preventDefault()
+        actionsRef.current?.shapeTool()
+      } else if (!ctrl && k === 'v') {
+        // 이동/선택 도구로 되돌리기
+        e.preventDefault()
+        actionsRef.current?.pickTool('move')
       } else if (e.key.startsWith('Arrow')) {
         // 선택이 있으면 미세 이동, 없으면 슬라이드 넘기기 — 파워포인트와 같은 감각
         e.preventDefault()
@@ -485,11 +638,63 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
       } else if (e.key === 'Escape' || e.key === 'Enter') {
         // 변형 중이면 변형만 끝낸다. 선택은 유지 — 바로 다시 손보고 싶을 때가 많다
         actionsRef.current?.clear()
+        // Esc 는 올가미 같은 도구도 기본(이동)으로 되돌린다
+        if (e.key === 'Escape') actionsRef.current?.pickTool('move')
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  /**
+   * 캔버스 **밖**에 떨어진 파일은 조용히 무시한다.
+   *
+   * 막지 않으면 크로미움이 그 파일로 이동해 편집 화면이 통째로 사라진다.
+   * 캔버스는 자기 자리에서 `preventDefault` 로 먼저 가로채므로 여기까지 오지 않는다.
+   */
+  useEffect(() => {
+    const swallow = (e: DragEvent): void => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault()
+    }
+    window.addEventListener('dragover', swallow)
+    window.addEventListener('drop', swallow)
+    return () => {
+      window.removeEventListener('dragover', swallow)
+      window.removeEventListener('drop', swallow)
+    }
+  }, [])
+
+  /**
+   * 타임라인 구간과 전체 길이.
+   *
+   * 문서가 바뀔 때만 다시 센다 — 선택이나 도구를 바꿨다고 다시 셀 이유가 없다.
+   * (조기 return 앞이라 훅 순서가 흔들리지 않게 여기서 계산한다)
+   */
+  const timeline = useMemo(() => {
+    const segments: { idx: number; name: string; ms: number; start: number }[] = []
+    let at = 0
+    for (const [idx, s] of (deck?.slides ?? []).entries()) {
+      if (!s.elements.some((e) => e.visible)) continue
+      const ms = slideDurationMs(s, deck!.canvas.height, deck!.smarts)
+      segments.push({ idx, name: s.name || `슬라이드 ${idx + 1}`, ms, start: at })
+      at += ms
+    }
+    return { segments, totalMs: at }
+  }, [deck])
+
+  /** 지금 보고 있는 장의 길이 (상태바 표시용) */
+  const thisSlideMs = useMemo(
+    () => (realSlide && deck ? slideDurationMs(realSlide, deck.canvas.height, deck.smarts) : 0),
+    [realSlide, deck]
+  )
+
+  /**
+   * 되돌리기·불러오기로 편집 중이던 고급 개체가 사라졌으면 밖으로 나온다.
+   * 없는 내용을 계속 편집하고 있는 상태가 제일 곤란하다.
+   */
+  useEffect(() => {
+    if (editPath.length > 0 && !editPath.every((id) => deck?.smarts?.[id])) setEditPath([])
+  }, [deck, editPath])
 
   const nav = useCanvasNav({
     onPan: (dx, dy) => {
@@ -501,7 +706,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     onZoomBy: zoomByFactor
   })
 
-  if (!deck || !slide || !info) return <p className="mono">불러오는 중…</p>
+  if (!deck || !slide || !realSlide || !info) return <p className="mono">불러오는 중…</p>
 
   const selectedEls = slide.elements.filter((e) => selected.includes(e.id))
   const single = selectedEls.length === 1 ? selectedEls[0] : null
@@ -510,8 +715,31 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     update({ ...deck!, slides: deck!.slides.map((s, k) => (k === i ? { ...s, ...p } : s)) })
   }
 
+  /**
+   * **지금 편집 중인 화면**의 내용을 갈아끼운다 — 슬라이드일 수도, 고급 개체 안쪽일 수도.
+   *
+   * 요소·묶음을 고치는 모든 길이 여기 하나로 모인다. 각자 `patchSlide` 를 부르면
+   * 고급 개체 안에서 한 편집이 엉뚱하게 바깥 슬라이드에 쓰인다.
+   */
+  function patchView(p: Partial<Slide>, addSmarts?: Record<string, SmartDoc>): void {
+    const smarts = addSmarts ? { ...smartsOf(deck!), ...addSmarts } : deck!.smarts
+    if (doc) {
+      const next: SmartDoc = { ...doc }
+      if (p.elements) next.elements = p.elements
+      if (p.groups) next.groups = p.groups
+      if (p.order) next.order = p.order
+      update({ ...deck!, smarts: { ...(smarts ?? {}), [doc.id]: next } })
+      return
+    }
+    update({
+      ...deck!,
+      ...(smarts ? { smarts } : {}),
+      slides: deck!.slides.map((s, k) => (k === slideIdx ? { ...s, ...p } : s))
+    })
+  }
+
   function patchElements(ids: string[], p: Partial<SlideElement>): void {
-    patchSlide(slideIdx, {
+    patchView({
       elements: slide!.elements.map((e) =>
         ids.includes(e.id) ? ({ ...e, ...p } as SlideElement) : e
       )
@@ -519,7 +747,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   }
 
   function patchFrames(frames: Record<string, Frame>): void {
-    patchSlide(slideIdx, {
+    patchView({
       elements: slide!.elements.map((e) => (frames[e.id] ? { ...e, frame: frames[e.id] } : e))
     })
   }
@@ -550,16 +778,172 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     const last = selected[selected.length - 1]
     const at = last ? list.findIndex((e) => e.id === last) + 1 : list.length
     list.splice(at, 0, el)
-    patchSlide(slideIdx, { elements: list })
+    patchView({ elements: list })
     setSelected([el.id])
     // 텍스트는 만들자마자 칠 수 있어야 한다 — 속성 패널까지 가서 고치게 하면 번거롭다
     if (el.kind === 'text') setEditingText(el.id)
   }
 
+  /** 특이 효과(기차 등)를 만든다 — 라이브러리 '특이 효과' 칸에서 끌거나 클릭할 때. */
+  function addSpecial(id: string, frame?: Partial<Frame>): void {
+    if (id === 'train') addElement(createTrain('chatRank', frame))
+  }
+
+  /**
+   * 탐색기에서 캔버스로 끌어다 놓은 파일.
+   *
+   * 놓은 자리에 이미지 요소를 만든다. 경로가 아니라 **내용**을 보낸다 —
+   * Electron 32 부터 렌더러에서 `File.path` 를 못 읽고, 어차피 에셋 폴더로 복사한다.
+   * 그림의 원래 비율을 재서 상자를 잡는다. 안 그러면 세로 사진이 가로로 늘어난 것처럼
+   * 보여서 놓자마자 크기부터 고쳐야 한다.
+   */
+  async function dropFiles(files: File[], at: { x: number; y: number }): Promise<void> {
+    const images = files.filter((f) => IMAGE_DROP.test(f.name))
+    if (images.length === 0) {
+      if (files.length > 0) {
+        void dlg.confirm({
+          title: '이미지만 놓을 수 있습니다',
+          message: 'png · jpg · gif · webp · svg 를 캔버스로 끌어다 놓으세요.',
+          detail: '소리는 아래 “소리” 칸에서, 프리셋은 위 메뉴의 “가져오기” 로 넣습니다.',
+          buttons: ['확인'],
+          cancelIndex: 0
+        })
+      }
+      return
+    }
+
+    const made: SlideElement[] = []
+    for (const [i, f] of images.entries()) {
+      const asset = await window.endcredit.assets.importBytes(f.name, await f.arrayBuffer())
+      const ratio = await imageRatio(asset.url)
+      // 캔버스 너비의 35% 를 기준으로 원래 비율만큼 높이를 잡는다
+      const w = 35
+      const h = (w * cw) / ratio / ch
+      made.push(
+        createImage(asset.url, {
+          x: Math.max(0, Math.min(100 - w, at.x - w / 2 + i * 2)),
+          y: Math.max(0, Math.min(100 - h, at.y - h / 2 + i * 2)),
+          w,
+          h
+        })
+      )
+    }
+
+    // 여러 장을 한 번에 놓아도 되돌리기 한 번이면 되도록 한꺼번에 넣는다
+    const list = [...slide!.elements, ...made]
+    patchView({ elements: list })
+    setSelected(made.map((m) => m.id))
+  }
+
+  /**
+   * 선택한 여러 요소를 **한 장의 이미지로 굽는다** (포토샵 '레이어 병합').
+   *
+   * 지금 보이는 모습 그대로 PNG 로 만들어 한 이미지 요소로 바꾼다. 데이터·효과는
+   * 그 순간 값으로 고정되고 다시 못 쪼갠다(되돌리기는 됨). 캔버스와 **같은 렌더러**
+   * (DeckRenderer)를 화면 밖에서 정지 상태로 한 번 더 그려 그걸 굽기 때문에, 글꼴·
+   * 스타일이 화면과 어긋나지 않는다.
+   */
+  async function mergeIds(ids: string[]): Promise<void> {
+    if (ids.length < 2 || !info) return
+    const els = slide!.elements.filter((e) => ids.includes(e.id))
+    if (els.length < 2) return
+
+    // 선택한 것만, 배경·화면효과·소리 없이, 원래 좌표 그대로 담은 임시 문서
+    // (고급 개체 안에서 구우면 그 개체의 캔버스가 기준이 된다)
+    const tempDeck: Deck = {
+      ...deck!,
+      canvas: { width: cw, height: ch },
+      slides: [
+        {
+          ...slide!,
+          kind: 'static',
+          background: { transparent: true, color: '#000000' },
+          screen: null,
+          sound: null,
+          elements: els,
+          groups: slide!.groups
+        }
+      ]
+    }
+
+    const host = document.createElement('div')
+    host.style.cssText = 'position:fixed; left:-99999px; top:0; opacity:0; pointer-events:none;'
+    const stage = document.createElement('div')
+    stage.style.cssText = `width:${cw}px; height:${ch}px; position:relative; overflow:hidden;`
+    host.appendChild(stage)
+    document.body.appendChild(host)
+    const root = createRoot(stage)
+
+    try {
+      root.render(
+        <DeckRenderer
+          deck={tempDeck}
+          data={info.data}
+          playing={false}
+          generation={0}
+          slideIndex={0}
+          audio={false}
+          onFinished={() => {}}
+        />
+      )
+      // 두 프레임 기다려 정지 화면이 실제로 그려지게 한다
+      await new Promise<void>((r) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => r()))
+      )
+      await inlineImages(stage)
+
+      const xml =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${cw}" height="${ch}">` +
+        `<foreignObject width="100%" height="100%">` +
+        new XMLSerializer().serializeToString(stage) +
+        `</foreignObject></svg>`
+
+      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml)
+      const img = new Image()
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('svg load failed'))
+        img.src = svgUrl
+      })
+
+      const canvas = document.createElement('canvas')
+      canvas.width = cw
+      canvas.height = ch
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.drawImage(img, 0, 0)
+      const png = canvas.toDataURL('image/png')
+
+      const asset = await window.endcredit.assets.saveImage(png)
+      if (!asset) return
+
+      // 병합 이미지는 선택 중 **가장 위**에 있던 자리에 놓는다 (겹침 순서 보존)
+      const order = slide!.elements.map((e) => e.id)
+      const maxPos = Math.max(...ids.map((id) => order.indexOf(id)))
+      const remaining = slide!.elements.filter((e) => !ids.includes(e.id))
+      const insertAt = remaining.filter((e) => order.indexOf(e.id) < maxPos).length
+      const merged = createImage(asset.url, { x: 0, y: 0, w: 100, h: 100 })
+      merged.name = '병합된 이미지'
+      remaining.splice(insertAt, 0, merged)
+      patchView({ elements: remaining })
+      setSelected([merged.id])
+      setTransforming(false)
+    } catch (err) {
+      console.error('레이어 병합 실패', err)
+    } finally {
+      root.unmount()
+      host.remove()
+    }
+  }
+
+  function mergeSelected(): void {
+    void mergeIds(selected)
+  }
+
   /** 효과는 **선택한 모든 요소**에 걸린다. 그룹을 잡으면 그룹 전체가 함께 움직인다. */
   function applyEffect(ids: string[], effectId: string): void {
     const e = getEffect(effectId)
-    patchSlide(slideIdx, {
+    patchView({
       elements: slide!.elements.map((el) => {
         if (!ids.includes(el.id)) return el
         if (e.category === 'emphasis') {
@@ -664,7 +1048,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     const gid = newId('g')
     const count = new Set(slide!.elements.map((e) => e.groupId).filter(Boolean)).size + 1
 
-    patchSlide(slideIdx, {
+    patchView({
       elements: slide!.elements.map((e) =>
         selected.includes(e.id) ? ({ ...e, groupId: gid } as SlideElement) : e
       ),
@@ -675,7 +1059,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   /** 묶음 설정 한 조각만 갈아끼운다. 이름을 고칠 때 효과가 날아가면 안 된다. */
   function patchGroup(gid: string, p: Partial<SlideGroup>): void {
     const cur = slide!.groups?.[gid] ?? { name: '' }
-    patchSlide(slideIdx, { groups: { ...(slide!.groups ?? {}), [gid]: { ...cur, ...p } } })
+    patchView({ groups: { ...(slide!.groups ?? {}), [gid]: { ...cur, ...p } } })
   }
 
   function renameGroup(gid: string, name: string): void {
@@ -723,7 +1107,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
 
   function deleteSelected(): void {
     if (selected.length === 0) return
-    patchSlide(slideIdx, { elements: slide!.elements.filter((e) => !selected.includes(e.id)) })
+    patchView({ elements: slide!.elements.filter((e) => !selected.includes(e.id)) })
     setSelected([])
     setTransforming(false)
   }
@@ -773,7 +1157,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
       slide!.elements.filter((e) => ids.includes(e.id)),
       offset
     )
-    patchSlide(slideIdx, {
+    patchView({
       elements: [...slide!.elements, ...copies.elements],
       groups: { ...(slide!.groups ?? {}), ...copies.groups }
     })
@@ -788,7 +1172,8 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
    */
   function nudgeSelection(key: string, big: boolean): void {
     if (selected.length === 0) {
-      // 잡은 게 없으면 장을 넘긴다
+      // 잡은 게 없으면 장을 넘긴다 (고급 개체 안에서는 넘길 장이 없다)
+      if (doc) return
       if (key === 'ArrowUp' || key === 'ArrowLeft') setSlideIdx((i) => Math.max(0, i - 1))
       if (key === 'ArrowDown' || key === 'ArrowRight')
         setSlideIdx((i) => Math.min(deck!.slides.length - 1, i + 1))
@@ -813,15 +1198,18 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
    * 목록의 **아래쪽일수록 앞(위)에 그려진다** — 나중에 그린 것이 위로 오기 때문이다.
    * 등장 순서와는 별개다 (그건 속성의 '등장 차례'에서 따로 정한다).
    */
-  function reorderZ(mode: 'front' | 'forward' | 'backward' | 'back'): void {
-    if (selected.length === 0) return
+  function reorderZ(
+    mode: 'front' | 'forward' | 'backward' | 'back',
+    ids: string[] = selected
+  ): void {
+    if (ids.length === 0) return
     const list = [...slide!.elements]
-    const on = (e: SlideElement): boolean => selected.includes(e.id)
+    const on = (e: SlideElement): boolean => ids.includes(e.id)
 
     if (mode === 'front' || mode === 'back') {
       const picked = list.filter(on)
       const rest = list.filter((e) => !on(e))
-      patchSlide(slideIdx, {
+      patchView({
         elements: mode === 'front' ? [...rest, ...picked] : [...picked, ...rest]
       })
       return
@@ -836,7 +1224,160 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
         if (on(list[i]) && !on(list[i - 1])) [list[i], list[i - 1]] = [list[i - 1], list[i]]
       }
     }
-    patchSlide(slideIdx, { elements: list })
+    patchView({ elements: list })
+  }
+
+  function deleteIds(ids: string[]): void {
+    if (ids.length === 0) return
+    patchView({ elements: slide!.elements.filter((e) => !ids.includes(e.id)) })
+    setSelected((prev) => prev.filter((i) => !ids.includes(i)))
+    setTransforming(false)
+  }
+
+  // ── 고급 개체 ─────────────────────────────────────────────
+
+  /**
+   * 고른 것을 **고급 개체 한 줄로 접는다** (포토샵 '고급 개체로 변환').
+   *
+   * 내용은 문서 보관함으로 옮겨 가고 그 자리엔 개체 요소 하나만 남는다. 하나만 골라도 된다 —
+   * 도형 한 장을 원본을 지키며 늘이고 싶을 때가 있다.
+   */
+  function smartify(ids: string[]): void {
+    const els = slide!.elements.filter((e) => ids.includes(e.id))
+    if (els.length === 0) return
+
+    const count = Object.keys(smartsOf(deck!)).length + 1
+    const { el, doc: made } = makeSmart(
+      // 묶음은 안쪽으로 그대로 딸려간다 (이름·묶음 효과까지) — 접었다고 구조가 무너지면 안 된다
+      els,
+      slide!.groups ?? {},
+      { width: cw, height: ch },
+      `고급 개체 ${count}`,
+      delaysFor(slide!)
+    )
+
+    // 접힌 자리는 **가장 위에 있던 것** 자리 — 겹침 순서가 튀지 않게
+    const order = slide!.elements.map((e) => e.id)
+    const top = Math.max(...ids.map((id) => order.indexOf(id)))
+    const rest = slide!.elements.filter((e) => !ids.includes(e.id))
+    rest.splice(rest.filter((e) => order.indexOf(e.id) < top).length, 0, el)
+
+    patchView({ elements: rest }, { [made.id]: made })
+    setSelected([el.id])
+    setTransforming(false)
+  }
+
+  /**
+   * 고급 개체를 그 자리에 **풀어놓는다**.
+   * 보관함 항목은 남긴다 — 다른 자리가 같은 내용을 쓰고 있을 수 있다.
+   */
+  function unsmartify(id: string): void {
+    const el = slide!.elements.find((e) => e.id === id)
+    if (!el || el.kind !== 'smart') return
+    const src = smartsOf(deck!)[el.docId]
+    if (!src) return
+
+    const out = unpackSmart(el, src, { width: cw, height: ch })
+    const list = [...slide!.elements]
+    list.splice(
+      list.findIndex((e) => e.id === id),
+      1,
+      ...out.elements
+    )
+    patchView({ elements: list, groups: { ...(slide!.groups ?? {}), ...out.groups } })
+    setSelected(out.elements.map((e) => e.id))
+    setTransforming(false)
+  }
+
+  /** 고급 개체 안으로 들어간다 (두 번 클릭 · 메뉴 · 속성 버튼). */
+  function enterSmart(id: string): void {
+    const el = slide!.elements.find((e) => e.id === id)
+    if (!el || el.kind !== 'smart' || !smartsOf(deck!)[el.docId]) return
+    setEditPath((p) => [...p, el.docId])
+    setSelected([])
+    setTransforming(false)
+    setEditingText(null)
+  }
+
+  /** `depth` 단계까지만 남기고 나온다 (0 = 슬라이드로). */
+  function exitSmart(depth: number): void {
+    setEditPath((p) => p.slice(0, Math.max(0, depth)))
+    setSelected([])
+    setTransforming(false)
+    setEditingText(null)
+  }
+
+  function renameSmart(docId: string, name: string): void {
+    const d = smartsOf(deck!)[docId]
+    if (!d) return
+    update({ ...deck!, smarts: { ...smartsOf(deck!), [docId]: { ...d, name } } })
+  }
+
+  /**
+   * 고급 개체 안에 **자기 자신**(또는 자기를 품은 것)을 넣으려는지.
+   * 한 번 만들어지면 그리는 쪽이 끝없이 파고들어 화면이 멈춘다.
+   */
+  function loops(el: SlideElement): boolean {
+    return Boolean(doc) && el.kind === 'smart' && smartUses(el.docId, doc!.id, smartsOf(deck!))
+  }
+
+  /**
+   * 요소칸 우클릭 메뉴의 명령을 한 곳에서 처리한다.
+   *
+   * 대상 id 를 **명시적으로** 받는다 — 우클릭이 선택을 바꾸는 순간과 메뉴 클릭 사이에
+   * `selected` 가 아직 갱신되지 않았을 수 있어, 선택 상태에 기대면 엉뚱한 레이어에 걸린다.
+   */
+  function layerCmd(cmd: LayerCmd, ids: string[]): void {
+    switch (cmd) {
+      case 'front':
+      case 'forward':
+      case 'backward':
+      case 'back':
+        reorderZ(cmd, ids)
+        break
+      case 'lock':
+        patchElements(ids, { locked: true } as Partial<SlideElement>)
+        break
+      case 'unlock':
+        patchElements(ids, { locked: false } as Partial<SlideElement>)
+        break
+      case 'hide':
+        patchElements(ids, { visible: false })
+        break
+      case 'show':
+        patchElements(ids, { visible: true })
+        break
+      case 'duplicate':
+        duplicateSelected(3, ids)
+        break
+      case 'delete':
+        deleteIds(ids)
+        break
+      case 'ungroup':
+        patchElements(ids, { groupId: null } as Partial<SlideElement>)
+        break
+      case 'copyEffect': {
+        // 등장·강조·퇴장 한 벌을 통째로 복사한다. 위치·크기는 건드리지 않는다.
+        const el = slide!.elements.find((e) => e.id === ids[0])
+        if (el) setEffectClip(structuredClone(el.motion))
+        break
+      }
+      case 'pasteEffect':
+        if (effectClip) patchElements(ids, { motion: structuredClone(effectClip) })
+        break
+      case 'smart':
+        smartify(ids)
+        break
+      case 'unsmart':
+        unsmartify(ids[0])
+        break
+      case 'editSmart':
+        enterSmart(ids[0])
+        break
+      case 'merge':
+        void mergeIds(ids)
+        break
+    }
   }
 
   function copySelected(): void {
@@ -863,11 +1404,13 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
    */
   function pasteClipboard(): void {
     const { elements, groups } = clipboard.current
-    if (elements.length === 0) return
+    // 자기 안에 자기를 넣는 것만 조용히 거른다 (순환)
+    const usable = elements.filter((e) => !loops(e))
+    if (usable.length === 0) return
     const here = new Set(slide!.elements.map((e) => e.id))
-    const sameSlide = elements.some((e) => here.has(e.id))
-    const copies = cloneElements(elements, sameSlide ? 3 : 0, groups)
-    patchSlide(slideIdx, {
+    const sameSlide = usable.some((e) => here.has(e.id))
+    const copies = cloneElements(usable, sameSlide ? 3 : 0, groups)
+    patchView({
       elements: [...slide!.elements, ...copies.elements],
       groups: { ...(slide!.groups ?? {}), ...copies.groups }
     })
@@ -894,7 +1437,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     const list = [...slide!.elements]
     const at = list.findIndex((e) => e.id === id)
     list.splice(at, 1, ...items)
-    patchSlide(slideIdx, { elements: list })
+    patchView({ elements: list })
     setSelected(items.map((i) => i.id))
   }
 
@@ -929,15 +1472,38 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     setSelected([])
   }
 
-  /** 지금 보고 있는 장의 효과를 한 번 재생한다. */
+  /**
+   * 미리보기를 즉시 끝낸다.
+   *
+   * 장 길이는 기차가 다 지나갈 때까지 늘어나 2분이 넘기도 한다 — 끝날 때까지 기다리게
+   * 두면 "정지를 눌렀는데 안 멈춘다" 가 된다. 멈추는 길은 항상 열려 있어야 한다.
+   */
+  function stopPreview(): void {
+    if (previewTimer.current) {
+      clearTimeout(previewTimer.current)
+      previewTimer.current = null
+    }
+    setPreviewing(false)
+  }
+
+  /** 지금 보고 있는 장의 효과를 한 번 재생한다. 재생 중에 누르면 멈춘다. */
   function previewSlide(): void {
+    if (previewing) return stopPreview()
     if (previewTimer.current) clearTimeout(previewTimer.current)
+    setSeek(null)
     setPreviewGen((g) => g + 1)
     setPreviewing(true)
 
     // 길이 계산은 한 곳(deck.ts)만 쓴다 — 미리보기가 짧으면 퇴장 효과를 못 본다
-    const dur = slideDurationMs(slide!, ch)
+    const dur = slideDurationMs(slide!, ch, deck!.smarts)
     previewTimer.current = setTimeout(() => setPreviewing(false), dur + 400)
+  }
+
+  /** 지금 도는 것 전부 멈춤 — 방송 재생 · 미리보기 · 세워둔 시점. */
+  function stopEverything(): void {
+    window.endcredit.overlay.stop()
+    stopPreview()
+    setSeek(null)
   }
 
   actionsRef.current = {
@@ -948,8 +1514,12 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     cut: cutSelected,
     paste: pasteClipboard,
     clear: () => {
+      // 자유 변형 → 시점 보기 → 선택 → 고급 개체에서 한 단계 나가기 순으로 물러난다
       if (transforming) setTransforming(false)
-      else setSelected([])
+      else if (previewing) stopPreview()
+      else if (seek !== null) setSeek(null)
+      else if (selected.length > 0) setSelected([])
+      else if (editPath.length > 0) exitSmart(editPath.length - 1)
     },
     group: toggleGroup,
     ungroup: ungroupSelected,
@@ -961,7 +1531,14 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
     saveAs: () => void saveAs(),
     newDeck: () => void startNew(),
     help: () => setHelp((h) => !h),
-    nudge: nudgeSelection
+    nudge: nudgeSelection,
+    pickTool: setTool,
+    shapeTool: () => {
+      if (tool !== 'draw') return setTool('draw')
+      const at = SHAPE_KINDS.findIndex((k) => k.value === drawKind)
+      setDrawKind(SHAPE_KINDS[(at + 1) % SHAPE_KINDS.length].value)
+    },
+    merge: mergeSelected
   }
 
   /** 오른쪽 클릭 메뉴 항목. 선택 상태에 따라 달라진다. */
@@ -985,9 +1562,13 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
       ]
     }
     const grouped = selectedEls.some((e) => e.groupId)
+    const smartOne = single && single.kind === 'smart' ? single : null
     return [
       ...(single && single.kind === 'text'
         ? [{ label: '글자 편집', hint: '두 번 클릭', onClick: () => setEditingText(single.id) }]
+        : []),
+      ...(smartOne
+        ? [{ label: '내용 편집', hint: '두 번 클릭', onClick: () => enterSmart(smartOne.id) }]
         : []),
       {
         label: transforming ? '자유 변형 끝내기' : '자유 변형',
@@ -1015,6 +1596,17 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
         hint: 'Ctrl+G',
         disabled: !grouped && selected.length < 2,
         onClick: toggleGroup
+      },
+      {
+        label: smartOne ? '고급 개체 해제' : '고급 개체로 변환',
+        hint: smartOne ? '풀어놓기' : '한 줄로 접기',
+        onClick: () => layerCmd(smartOne ? 'unsmart' : 'smart', selected)
+      },
+      {
+        label: '이미지로 병합',
+        hint: 'Ctrl+E',
+        disabled: selected.length < 2,
+        onClick: mergeSelected
       },
       { label: '삭제', hint: 'Delete', danger: true, onClick: deleteSelected }
     ]
@@ -1067,6 +1659,117 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       setMarquee(null)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  /**
+   * 올가미 선택.
+   *
+   * 자유곡선을 그려 **중심이 그 안에 든** 요소를 잡는다. 사각 범위(마퀴)로는
+   * 못 고르는 비스듬한 무리를 골라낼 수 있다. Shift 로 끌면 기존 선택에 더한다.
+   */
+  function startLasso(e: React.PointerEvent<HTMLDivElement>): void {
+    const box = e.currentTarget.getBoundingClientRect()
+    const toPct = (cx: number, cy: number): { x: number; y: number } => ({
+      x: ((cx - box.left) / (cw * scale)) * 100,
+      y: ((cy - box.top) / (ch * scale)) * 100
+    })
+    const additive = e.shiftKey
+    const before = additive ? selected : []
+    const pts: { x: number; y: number }[] = [toPct(e.clientX, e.clientY)]
+    setLasso(pts)
+
+    const move = (ev: PointerEvent): void => {
+      const p = toPct(ev.clientX, ev.clientY)
+      const last = pts[pts.length - 1]
+      // 점이 너무 촘촘하면 버린다 — 수백 점이 쌓이면 판정만 느려진다
+      if (Math.hypot(p.x - last.x, p.y - last.y) < 0.6) return
+      pts.push(p)
+      setLasso([...pts])
+    }
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setLasso(null)
+      if (pts.length < 3) return
+      const hit = slide!.elements
+        .filter(
+          (el) =>
+            el.visible &&
+            !el.locked &&
+            pointInPolygon({ x: el.frame.x + el.frame.w / 2, y: el.frame.y + el.frame.h / 2 }, pts)
+        )
+        .map((el) => el.id)
+      setSelected([...new Set([...before, ...hit])])
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  /**
+   * 도형을 끌어서 그린다 (파워포인트·피그마와 같다).
+   *
+   * 끈 자리가 곧 그 도형의 자리다. 그냥 누르기만 하면 기본 크기로 하나 놓는다 —
+   * 예전처럼 도구 막대만 눌러도 도형이 나오던 동작을 잃지 않게.
+   * Shift 를 누르고 끌면 정사각형/정원이 된다.
+   *
+   * `frame` 은 %인데 가로·세로의 1% 가 서로 다른 픽셀이다. 정사각형·선 굵기처럼
+   * **눈에 보이는 픽셀**로 따져야 하는 것은 캔버스 크기를 곱해서 계산한다.
+   */
+  function startDraw(e: React.PointerEvent<HTMLDivElement>): void {
+    const box = e.currentTarget.getBoundingClientRect()
+    const toPct = (cx: number, cy: number): { x: number; y: number } => ({
+      x: ((cx - box.left) / (cw * scale)) * 100,
+      y: ((cy - box.top) / (ch * scale)) * 100
+    })
+    const from = toPct(e.clientX, e.clientY)
+    const kind = drawKind
+    /** px → % (가로·세로가 다르다) */
+    const pctW = (px: number): number => (px / cw) * 100
+    const pctH = (px: number): number => (px / ch) * 100
+
+    let drawn: Frame | null = null
+
+    const rectAt = (ev: PointerEvent): Frame => {
+      const to = toPct(ev.clientX, ev.clientY)
+      let w = to.x - from.x
+      let h = to.y - from.y
+
+      if (ev.shiftKey && kind !== 'line') {
+        // 화면에서 정사각으로 보여야 하므로 픽셀로 맞춘다
+        const px = Math.max((Math.abs(w) * cw) / 100, (Math.abs(h) * ch) / 100)
+        w = Math.sign(w || 1) * pctW(px)
+        h = Math.sign(h || 1) * pctH(px)
+      }
+      if (kind === 'line') {
+        // 가로로 길게 끌면 가로선, 세로로 길게 끌면 세로선 — 굵기 2px
+        if (Math.abs(w) * cw >= Math.abs(h) * ch) h = Math.sign(h || 1) * pctH(2)
+        else w = Math.sign(w || 1) * pctW(2)
+      }
+
+      return {
+        x: Math.min(from.x, from.x + w),
+        y: Math.min(from.y, from.y + h),
+        w: Math.abs(w),
+        h: Math.abs(h)
+      }
+    }
+
+    const move = (ev: PointerEvent): void => {
+      const r = rectAt(ev)
+      // 살짝 떨린 클릭까지 '끌었다'로 보면 그냥 누르기가 안 된다 (3px 미만은 무시)
+      if ((r.w * cw) / 100 < 3 && (r.h * ch) / 100 < 3) return
+      drawn = r
+      setDrawBox(r)
+    }
+    const up = (): void => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setDrawBox(null)
+      setTool('move')
+      addElement(createShape(kind, drawn ?? undefined))
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -1132,20 +1835,36 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
       loop: m.loop === id ? null : m.loop,
       exit: m.exit === id ? null : m.exit
     })
+    const cleanGroups = (
+      groups: Record<string, SlideGroup> | undefined
+    ): Record<string, SlideGroup> | undefined =>
+      groups
+        ? Object.fromEntries(
+            Object.entries(groups).map(([gid, g]) => [
+              gid,
+              g.motion ? { ...g, motion: clean(g.motion) } : g
+            ])
+          )
+        : groups
+
     update({
       ...deck!,
       effects: effectsOf(deck!).filter((f) => f.id !== id),
+      // 고급 개체 안에 든 요소도 함께 훑는다 — 안 그러면 없는 효과 id 가 남는다
+      smarts: Object.fromEntries(
+        Object.entries(smartsOf(deck!)).map(([docId, d]) => [
+          docId,
+          {
+            ...d,
+            elements: d.elements.map((e) => ({ ...e, motion: clean(e.motion) })),
+            groups: cleanGroups(d.groups)
+          }
+        ])
+      ),
       slides: deck!.slides.map((s) => ({
         ...s,
         elements: s.elements.map((e) => ({ ...e, motion: clean(e.motion) })),
-        groups: s.groups
-          ? Object.fromEntries(
-              Object.entries(s.groups).map(([gid, g]) => [
-                gid,
-                g.motion ? { ...g, motion: clean(g.motion) } : g
-              ])
-            )
-          : s.groups,
+        groups: cleanGroups(s.groups),
         transition:
           s.transition?.preset === id ? { ...s.transition, preset: 'fade' } : s.transition
       }))
@@ -1155,12 +1874,12 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
 
   async function pickBackground(): Promise<void> {
     const asset = await window.endcredit.assets.pickImage()
-    if (asset) patchSlide(slideIdx, { background: { ...slide!.background, image: asset.url } })
+    if (asset) patchSlide(slideIdx, { background: { ...realSlide!.background, image: asset.url } })
   }
 
   /** 배경을 모든 장에 똑같이. 장마다 파일을 고르게 하면 열 장짜리 크레딧이 고역이다. */
   function applyBackgroundToAll(): void {
-    const bg = { ...slide!.background }
+    const bg = { ...realSlide!.background }
     update({ ...deck!, slides: deck!.slides.map((s) => ({ ...s, background: { ...bg } })) })
   }
 
@@ -1170,6 +1889,42 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   }
 
   const busy = info.playing || previewing
+
+  /**
+   * 타임라인 구간 — 재생기가 건너뛰는 장(보이는 요소가 없는 장)은 빼고 센다.
+   * 그래야 막대의 눈금과 실제 재생 시각이 어긋나지 않는다.
+   *
+   * **반드시 캐시해야 한다.** 장 하나의 길이를 재려면 요소와 고급 개체 안쪽까지 훑는데,
+   * 슬라이더를 끌면 초당 60번 다시 그려진다 — 그때마다 전 슬라이드를 훑으면 버벅인다.
+   */
+  const { segments, totalMs } = timeline
+  const segAt = (t: number): (typeof segments)[number] | null =>
+    segments.find((s) => t < s.start + s.ms) ?? segments[segments.length - 1] ?? null
+
+  /** 타임라인을 찍거나 끌었을 때 — 그 장으로 옮기고 그 시점에 세워 둔다. */
+  function scrubTo(t: number): void {
+    const clamped = Math.max(0, Math.min(totalMs, t))
+    const seg = segAt(clamped)
+    if (!seg) return
+    setSeek(clamped)
+    setSlideIdx(seg.idx)
+    setSelected([])
+    setTransforming(false)
+    setEditingText(null)
+  }
+
+  /** 지금 찍어 둔 시점이 **그 장 안에서** 몇 ms 인지 (렌더러가 쓰는 값) */
+  const seekInSlide = ((): number | null => {
+    if (seek === null || doc) return null
+    const seg = segAt(seek)
+    return seg ? Math.max(0, seek - seg.start) : null
+  })()
+  /**
+   * 시점을 세워 놓고 보는 중.
+   * 요소가 효과 중간에 멈춰 있어 **화면 위치와 frame 이 다르므로**, 이때는 클릭판·선택
+   * 상자를 띄우지 않는다 — 엉뚱한 자리를 잡게 된다. 캔버스를 누르면 편집으로 돌아온다.
+   */
+  const scrubbing = seekInSlide !== null
 
   return (
     <div className="pp">
@@ -1216,11 +1971,25 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
         <div className="spacer" />
         <CollectorChip totals={info.data.totals} />
         {info.playing ? (
-          <button onClick={() => window.endcredit.overlay.stop()}>■ 정지</button>
-        ) : (
-          <button className="primary" onClick={() => window.endcredit.overlay.play()}>
-            ▶ 전체 재생
+          <button onClick={stopEverything}>
+            ■ 정지{info.onlySlide != null ? ` (${info.onlySlide + 1}장)` : ''}
           </button>
+        ) : (
+          <>
+            <button className="primary" onClick={() => window.endcredit.overlay.play()}>
+              ▶ 전체 재생
+            </button>
+            {/*
+              보고 있는 장 하나만 방송으로 내보낸다. 40장짜리에서 12번째 장을 OBS 로
+              확인하려고 앞의 11장을 기다릴 수는 없다. 그 장이 끝나면 크레딧도 끝난다.
+            */}
+            <button
+              onClick={() => window.endcredit.overlay.play(slideIdx)}
+              title="지금 보고 있는 장만 OBS 로 내보냅니다 (끝나면 자동으로 멈춥니다)"
+            >
+              ▶ 이 장만 방송
+            </button>
+          </>
         )}
         <button onClick={() => window.endcredit.overlay.restart()}>↻ 처음부터</button>
         <label className={`toggle ${info.sample ? 'on' : ''}`}>
@@ -1247,6 +2016,8 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
           onSelect={(i) => {
             setSlideIdx(i)
             setSelected([])
+            // 다른 장을 고르면 고급 개체 안에서 나온다 — 안에 있는데 장이 바뀌면 어리둥절하다
+            setEditPath([])
           }}
           onAdd={(kind) => {
             const s = createSlide(
@@ -1299,6 +2070,25 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
 
         <div className="pp-stage">
           <div className="pp-tools">
+            <button
+              className={tool === 'move' ? 'active' : ''}
+              onClick={() => setTool('move')}
+              title="이동·선택 도구 (V)"
+            >
+              <b>⤢</b>
+              <span className="lbl">이동</span>
+            </button>
+            <button
+              className={tool === 'lasso' ? 'active' : ''}
+              onClick={() => setTool('lasso')}
+              title="올가미 — 자유곡선으로 감싼 요소를 선택 (L)"
+            >
+              <b>◌</b>
+              <span className="lbl">올가미</span>
+            </button>
+
+            <span className="pp-div" />
+
             <button onClick={() => addElement(createText())}>
               <b>T</b>
               <span className="lbl">텍스트</span>
@@ -1315,10 +2105,34 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
               <b>①</b>
               <span className="lbl">등수 하나</span>
             </button>
-            <button onClick={() => addElement(createShape())}>
-              <b>▬</b>
+            {/*
+              도형은 '넣기'가 아니라 **도구**다 — 골라두고 캔버스에 끌어 그린다.
+              종류 고르개는 도구를 켠 동안에만 나온다. 늘 띄워두면 도구 막대가 세 칸 더
+              길어지는데, 이 막대는 이미 창을 좁히면 잘린다.
+            */}
+            <button
+              className={tool === 'draw' ? 'active' : ''}
+              onClick={() => setTool(tool === 'draw' ? 'move' : 'draw')}
+              title="도형 — 캔버스에 끌어서 그립니다 (R). Shift 로 정사각형·정원"
+            >
+              <b>{SHAPE_KINDS.find((k) => k.value === drawKind)?.icon}</b>
               <span className="lbl">도형</span>
             </button>
+            {tool === 'draw' && (
+              <span className="pp-kinds">
+                {SHAPE_KINDS.map((k) => (
+                  <button
+                    key={k.value}
+                    className={drawKind === k.value ? 'active' : ''}
+                    onClick={() => setDrawKind(k.value)}
+                    title={k.label}
+                  >
+                    <b>{k.icon}</b>
+                    <span className="lbl">{k.label}</span>
+                  </button>
+                ))}
+              </span>
+            )}
 
             <span className="pp-div" />
 
@@ -1362,9 +2176,13 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
               <b>⤡</b>
               <span className="lbl">자유 변형</span>
             </button>
-            <button className="primary" onClick={previewSlide} title="이 장의 효과를 재생해 봅니다">
-              <b>▶</b>
-              <span className="lbl">이 장 재생</span>
+            <button
+              className={previewing ? 'active' : 'primary'}
+              onClick={previewSlide}
+              title={previewing ? '미리보기 멈추기' : '이 장의 효과를 재생해 봅니다'}
+            >
+              <b>{previewing ? '■' : '▶'}</b>
+              <span className="lbl">{previewing ? '멈추기' : '이 장 재생'}</span>
             </button>
             <button
               disabled={selected.length === 0}
@@ -1380,27 +2198,84 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
               ?<span className="lbl"> 도움말</span>
             </button>
             <span className="mono pp-hint">
-Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 · 빈 곳 끌어 범위 선택 · 오른쪽 클릭 메뉴
+Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 · 빈 곳 끌어 범위 선택 · L 올가미 · R 도형 끌어 그리기 · 오른쪽 클릭 메뉴
             </span>
           </div>
+
+          {/* 고급 개체 안이면 어디에 들어와 있는지 — 나가는 길이 늘 보여야 갇힌 느낌이 없다 */}
+          {editPath.length > 0 && (
+            <div className="crumb-bar">
+              <button onClick={() => exitSmart(0)}>{realSlide.name || `슬라이드 ${slideIdx + 1}`}</button>
+              {editPath.map((id, i) => (
+                <span key={id}>
+                  <i>›</i>
+                  <button
+                    className={i === editPath.length - 1 ? 'here' : ''}
+                    onClick={() => exitSmart(i + 1)}
+                  >
+                    ◈ {deck.smarts?.[id]?.name ?? '고급 개체'}
+                  </button>
+                </span>
+              ))}
+              <div className="spacer" />
+              <span className="mono">
+                {cw}×{ch} · 여기서 고친 내용은 이 개체를 쓰는 모든 자리에 반영됩니다
+              </span>
+              <button className="primary" onClick={() => exitSmart(editPath.length - 1)}>
+                나가기 (Esc)
+              </button>
+            </div>
+          )}
 
           <div className="ps-area" ref={areaRef} onWheel={nav.handlers.onWheel}>
             <div
               ref={canvasRef}
-              className={`ps-canvas nav-${nav.mode}`}
+              className={`ps-canvas nav-${nav.mode} ${
+                nav.mode === 'none' && tool !== 'move' ? `tool-${tool}` : ''
+              } ${fileOver ? 'file-over' : ''}`}
               style={{ width: cw * scale, height: ch * ratio * scale }}
               onDragOver={(e) => {
                 const t = e.dataTransfer.types
-                if (t.includes(FIELD_DRAG_TYPE) || t.includes(SCREEN_FX_DRAG_TYPE)) {
+                if (
+                  t.includes(FIELD_DRAG_TYPE) ||
+                  t.includes(SCREEN_FX_DRAG_TYPE) ||
+                  t.includes(SPECIAL_DRAG_TYPE) ||
+                  // 탐색기에서 끌어온 파일
+                  t.includes('Files')
+                ) {
                   e.preventDefault()
+                  setFileOver(t.includes('Files'))
                 }
               }}
+              onDragLeave={(e) => {
+                // 안쪽 요소를 지나갈 때마다 깜빡이지 않게, 캔버스를 정말로 벗어났을 때만 끈다
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileOver(false)
+              }}
               onDrop={(e) => {
+                setFileOver(false)
+                // 탐색기에서 끌어온 파일이 먼저다 (안쪽 끌기와 섞이지 않는다)
+                if (e.dataTransfer.files.length > 0) {
+                  e.preventDefault()
+                  const r = e.currentTarget.getBoundingClientRect()
+                  void dropFiles(Array.from(e.dataTransfer.files), {
+                    x: ((e.clientX - r.left) / (cw * scale)) * 100,
+                    y: ((e.clientY - r.top) / (ch * scale)) * 100
+                  })
+                  return
+                }
                 // 화면 효과는 장 전체에 걸린다 — 캔버스 아무 데나 놓으면 된다
                 const fx = e.dataTransfer.getData(SCREEN_FX_DRAG_TYPE)
                 if (fx) {
                   e.preventDefault()
                   return applyScreenFx(slideIdx, fx)
+                }
+                // 특이 효과는 놓은 자리에 그 요소를 만든다
+                const special = e.dataTransfer.getData(SPECIAL_DRAG_TYPE)
+                if (special) {
+                  e.preventDefault()
+                  const r = e.currentTarget.getBoundingClientRect()
+                  const y = ((e.clientY - r.top) / (ch * scale)) * 100
+                  return addSpecial(special, { y: Math.max(0, Math.min(80, y - 13)) })
                 }
                 const token = e.dataTransfer.getData(FIELD_DRAG_TYPE)
                 if (!token) return
@@ -1420,6 +2295,11 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
               onPointerDown={(e) => {
                 nav.handlers.onPointerDown(e)
                 if (nav.mode !== 'none' || e.button !== 0) return
+                // 시점을 세워 보던 중이면 먼저 편집으로 돌아온다
+                if (scrubbing) return setSeek(null)
+                if (tool === 'lasso') return startLasso(e)
+                // 도형은 요소 위에서 시작해도 그려져야 한다 — 빈 곳 검사를 하지 않는다
+                if (tool === 'draw') return startDraw(e)
                 if (e.target === e.currentTarget) startMarquee(e)
               }}
             >
@@ -1427,13 +2307,22 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
                 className="ps-canvas-inner"
                 style={{ width: cw, height: ch * ratio, transform: `scale(${scale})` }}
               >
-                {/* 전체 재생 중이면 실제 재생을 따라가고, 아니면 이 장만 보여준다 */}
+                {/* 전체 재생 중이면 실제 재생을 따라가고, 아니면 이 장만 보여준다.
+                    고급 개체 안이면 그 개체를 **자기 캔버스를 가진 한 장**으로 만들어 보여준다 */}
                 <DeckRenderer
-                  deck={deck}
+                  deck={
+                    doc
+                      ? { ...deck, canvas: { width: cw, height: ch }, slides: [slide] }
+                      : deck
+                  }
                   data={info.data}
-                  playing={busy}
+                  /* 시점 보기도 '재생 중'이어야 효과가 붙는다 — 붙은 것을 그 시각에 세운다 */
+                  playing={busy || seekInSlide !== null}
                   generation={info.playing ? info.generation : previewGen}
-                  slideIndex={info.playing ? null : slideIdx}
+                  slideIndex={doc ? 0 : info.playing ? null : slideIdx}
+                  /* 방송이 한 장만 내보내는 중이면 편집 화면도 같은 것을 본다 */
+                  onlySlide={info.playing && !doc ? (info.onlySlide ?? null) : null}
+                  seekMs={seekInSlide}
                   hideElementId={editingText}
                   /* OBS 가 붙어 있으면 소리는 그쪽에 맡긴다 — 둘 다 울리면 두 번 들린다 */
                   audio={previewing || (info.playing && info.clients === 0)}
@@ -1442,6 +2331,7 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
               </div>
 
               {!busy &&
+                !scrubbing &&
                 slide.elements.map((el) =>
                   el.visible && !el.locked ? (
                     <span
@@ -1457,6 +2347,9 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
                       }}
                       onPointerDown={(e) => {
                         if (nav.mode !== 'none' || e.button !== 0) return
+                        // 이동 도구가 아니면 요소를 가로채지 않는다 —
+                        // 요소 위에서 시작해도 올가미가 그려지고 도형이 놓이게
+                        if (tool !== 'move') return
                         e.stopPropagation()
                         selectElement(el.id, { additive: e.shiftKey, alone: e.altKey })
                       }}
@@ -1466,6 +2359,11 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
                         openMenu(e)
                       }}
                       onDoubleClick={(e) => {
+                        // 포토샵과 같다 — 글자는 그 자리에서 고치고, 고급 개체는 그 안으로 들어간다
+                        if (el.kind === 'smart') {
+                          e.stopPropagation()
+                          return enterSmart(el.id)
+                        }
                         if (el.kind !== 'text') return
                         e.stopPropagation()
                         setEditingText(el.id)
@@ -1484,6 +2382,30 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
                     height: (marquee.h / 100) * ch * scale
                   }}
                 />
+              )}
+
+              {/* 그리는 중인 도형 — 놓기 전에 어떤 모양이 될지 그대로 보여준다 */}
+              {drawBox && (
+                <span
+                  className="draw-box"
+                  style={{
+                    left: (drawBox.x / 100) * cw * scale,
+                    top: (drawBox.y / 100) * ch * scale,
+                    width: (drawBox.w / 100) * cw * scale,
+                    height: (drawBox.h / 100) * ch * scale,
+                    borderRadius: drawKind === 'ellipse' ? '50%' : 4
+                  }}
+                />
+              )}
+
+              {lasso && lasso.length > 1 && (
+                <svg className="lasso-svg" width={cw * scale} height={ch * ratio * scale}>
+                  <polygon
+                    points={lasso
+                      .map((p) => `${(p.x / 100) * cw * scale},${(p.y / 100) * ch * scale}`)
+                      .join(' ')}
+                  />
+                </svg>
               )}
 
               {guides.map((g, i) => (
@@ -1526,7 +2448,7 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
                   )
                 })()}
 
-              {!busy && !editingText && nav.mode === 'none' && single && (
+              {!busy && !scrubbing && !editingText && nav.mode === 'none' && single && (
                 <SelectionBox
                   element={single}
                   transform={transforming}
@@ -1538,11 +2460,14 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
                   onRotate={(rotation) => patchElements([single.id], { rotation })}
                   onCommit={() => window.endcredit.overlay.setDeck(deck)}
                   onGuides={setGuides}
-                  onDoubleClick={() => single.kind === 'text' && setEditingText(single.id)}
+                  onDoubleClick={() => {
+                    if (single.kind === 'smart') enterSmart(single.id)
+                    else if (single.kind === 'text') setEditingText(single.id)
+                  }}
                 />
               )}
 
-              {!busy && !editingText && nav.mode === 'none' && selectedEls.length > 1 && (
+              {!busy && !scrubbing && !editingText && nav.mode === 'none' && selectedEls.length > 1 && (
                 <MultiSelectionBox
                   elements={selectedEls}
                   transform={transforming}
@@ -1558,6 +2483,59 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
             </div>
           </div>
 
+          {/* 재생 타임라인 — 아무 데나 찍으면 그 순간을 세워 놓고 본다.
+              고급 개체 안에서는 장 개념이 없으므로 띄우지 않는다. */}
+          {!doc && segments.length > 0 && (
+            <div className="tl-bar">
+              <button
+                className={scrubbing || previewing ? '' : 'active'}
+                onClick={() => (scrubbing ? setSeek(null) : previewSlide())}
+                title={
+                  scrubbing ? '편집으로 돌아가기 (Esc)' : previewing ? '미리보기 멈추기' : '이 장 재생'
+                }
+              >
+                {scrubbing ? '✎ 편집' : previewing ? '■ 멈추기' : '▶ 재생'}
+              </button>
+
+              <div
+                className="tl-track"
+                onPointerDown={(e) => {
+                  const box = e.currentTarget.getBoundingClientRect()
+                  const at = (cx: number): number => ((cx - box.left) / box.width) * totalMs
+                  scrubTo(at(e.clientX))
+                  const move = (ev: PointerEvent): void => scrubTo(at(ev.clientX))
+                  const up = (): void => {
+                    window.removeEventListener('pointermove', move)
+                    window.removeEventListener('pointerup', up)
+                  }
+                  window.addEventListener('pointermove', move)
+                  window.addEventListener('pointerup', up)
+                }}
+              >
+                {segments.map((s) => (
+                  <span
+                    key={s.idx}
+                    className={`tl-seg ${s.idx === slideIdx ? 'on' : ''}`}
+                    style={{ width: `${(s.ms / Math.max(1, totalMs)) * 100}%` }}
+                    title={`${s.name} · ${formatDuration(s.ms)}`}
+                  >
+                    <b>{s.name}</b>
+                  </span>
+                ))}
+                {seek !== null && (
+                  <span
+                    className="tl-head"
+                    style={{ left: `${(seek / Math.max(1, totalMs)) * 100}%` }}
+                  />
+                )}
+              </div>
+
+              <span className="mono tl-time">
+                {scrubbing ? `${(seek! / 1000).toFixed(1)}초` : '—'} / {formatDuration(totalMs)}
+              </span>
+            </div>
+          )}
+
           <div className="ps-statusbar">
             <button onClick={() => zoomByFactor(1 / 1.25)}>−</button>
             <span className="ps-zoom">{Math.round(scale * 100)}%</span>
@@ -1568,14 +2546,13 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
             <button onClick={() => setZoom(1)}>100%</button>
             <div className="spacer" />
             <span className="mono">
-              {slide.name} · {cw}×{Math.round(ch * ratio)}
+              {doc ? `◈ ${doc.name}` : slide.name} · {cw}×{Math.round(ch * ratio)}
               {selected.length > 0 && ` · ${selected.length}개 선택`}
               {nav.mode === 'hand' ? ' · 손도구' : nav.mode === 'zoom' ? ' · 돋보기' : ''}
             </span>
             {/* 아웃트로 음악 안에 끝나야 하는 경우가 많다 — 총 길이가 보여야 맞출 수 있다 */}
             <span className="len-chip" title="이 장 길이 · 크레딧 전체 길이">
-              이 장 {formatDuration(slideDurationMs(slide, ch))} · 전체{' '}
-              <b>{formatDuration(deckDurationMs(deck))}</b>
+              이 장 {formatDuration(thisSlideMs)} · 전체 <b>{formatDuration(totalMs)}</b>
             </span>
           </div>
         </div>
@@ -1587,10 +2564,10 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
           selectedIds={selected}
           onSelect={selectElement}
           onPatch={(p) => patchElements(selected, p)}
-          onPatchSlide={(p) => patchSlide(slideIdx, p)}
+          onPatchSlide={patchView}
           onToggle={(id, on) => patchElements([id], { visible: on })}
           onDelete={(id) => {
-            patchSlide(slideIdx, { elements: slide.elements.filter((e) => e.id !== id) })
+            patchView({ elements: slide.elements.filter((e) => e.id !== id) })
             setSelected((prev) => prev.filter((i) => i !== id))
           }}
           onDuplicate={(id) => duplicateSelected(3, [id])}
@@ -1598,21 +2575,32 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
             const list = [...slide.elements]
             const [m] = list.splice(from, 1)
             list.splice(to, 0, m)
-            patchSlide(slideIdx, { elements: list })
+            patchView({ elements: list })
           }}
           onDropEffect={(id, effectId) => applyEffect([id], effectId)}
           onPickImage={() => single && pickImage(single.id)}
           onSplitRanks={splitRanks}
           onSplitSlide={() => splitSlideIntoSlides(slideIdx)}
-          canSplitSlide={slide.elements.length > 1}
+          canSplitSlide={!doc && slide.elements.length > 1}
+          smartDoc={doc}
+          smartUses={(docId) => smartInstances(deck, docId)}
+          smartName={(docId) => deck.smarts?.[docId]?.name ?? '고급 개체'}
+          onRenameSmart={renameSmart}
+          onPickImageUrl={async () => (await window.endcredit.assets.pickImage())?.url ?? null}
           onGroup={toggleGroup}
           onUngroup={ungroupSelected}
           onRenameGroup={renameGroup}
           onPatchGroup={patchGroup}
           onDropGroupEffect={applyGroupEffect}
+          onLayerCmd={layerCmd}
+          canPasteEffect={effectClip !== null}
           onPickBackground={pickBackground}
           onApplyBackgroundToAll={applyBackgroundToAll}
           onScreenFx={(fx: ScreenFx | null) => patchSlide(slideIdx, { screen: fx })}
+          canvas={deck.canvas}
+          onCanvas={(c) => update(resizeDeckCanvas(deck, c))}
+          font={deck.font.family}
+          onFont={(family) => update({ ...deck, font: { family } })}
           data={info.data}
         />
       </div>
@@ -1675,6 +2663,7 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
             slideName={slide.name || `슬라이드 ${slideIdx + 1}`}
             onApply={(effectId) => selected.length > 0 && applyEffect(selected, effectId)}
             onApplyScreen={(effectId) => applyScreenFx(slideIdx, effectId)}
+            onAddSpecial={(id) => addSpecial(id)}
             onNewEffect={(category) => void editEffect(newCustomEffect(category), true)}
             onEditEffect={(id) => {
               const found = effectsOf(deck).find((f) => f.id === id)

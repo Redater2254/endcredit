@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AuthState, ServerStatus } from '@shared/types'
+import type { AuthState, ServerStatus, UpdateState } from '@shared/types'
 import type { CollectorStatus, RawEvent, SessionStats } from '@shared/events'
 import type { CreditData } from '@shared/aggregate'
 import type { Deck } from '@shared/deck'
@@ -54,9 +54,21 @@ const api = {
       return () => ipcRenderer.off('credit:changed', handler)
     }
   },
+  /** 자동 업데이트 — 확인은 앱이 알아서, 받는 것은 사용자가 누를 때만 */
+  update: {
+    get: (): Promise<UpdateState> => ipcRenderer.invoke('update:get'),
+    check: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),
+    download: (): Promise<void> => ipcRenderer.invoke('update:download'),
+    onChange: (fn: (s: UpdateState) => void): (() => void) => {
+      const handler = (_e: unknown, s: UpdateState): void => fn(s)
+      ipcRenderer.on('update:state', handler)
+      return () => ipcRenderer.off('update:state', handler)
+    }
+  },
   overlay: {
     state: (): Promise<OverlayInfo> => ipcRenderer.invoke('overlay:state'),
-    play: (): Promise<void> => ipcRenderer.invoke('overlay:play'),
+    /** `only` 를 주면 그 장 하나만 방송에 내보낸다 (안 주면 전체) */
+    play: (only?: number | null): Promise<void> => ipcRenderer.invoke('overlay:play', only ?? null),
     stop: (): Promise<void> => ipcRenderer.invoke('overlay:stop'),
     restart: (): Promise<void> => ipcRenderer.invoke('overlay:restart'),
     setSample: (on: boolean): Promise<void> => ipcRenderer.invoke('overlay:sample', on),
@@ -124,7 +136,18 @@ const api = {
     pickAudio: (): Promise<{ file: string; url: string; sizeBytes: number } | null> =>
       ipcRenderer.invoke('assets:pick-audio'),
     list: (): Promise<{ file: string; url: string; sizeBytes: number }[]> =>
-      ipcRenderer.invoke('assets:list')
+      ipcRenderer.invoke('assets:list'),
+    /** 레이어 병합으로 만든 PNG(data URL)를 저장하고 주소를 돌려준다 */
+    saveImage: (
+      dataUrl: string
+    ): Promise<{ file: string; url: string; sizeBytes: number } | null> =>
+      ipcRenderer.invoke('assets:save-image', dataUrl),
+    /** 탐색기에서 끌어다 놓은 파일 — 경로가 아니라 내용을 넘긴다 */
+    importBytes: (
+      name: string,
+      bytes: ArrayBuffer
+    ): Promise<{ file: string; url: string; sizeBytes: number }> =>
+      ipcRenderer.invoke('assets:import-bytes', name, bytes)
   }
 }
 

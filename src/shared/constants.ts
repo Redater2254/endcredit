@@ -1,10 +1,16 @@
 /**
- * 화면에 보여줄 버전 이름.
+ * 앱 버전. `package.json` 의 값이 빌드할 때 그대로 박힌다.
  *
- * `package.json` 의 버전은 설치 파일·업데이트가 쓰는 값이라 반드시 숫자(semver)여야 한다.
- * 사람에게 보여줄 이름은 그것과 별개여서 여기서 따로 정한다.
+ * **자동 업데이트가 붙은 뒤로 버전은 `package.json` 한 곳이 기준이다.** 앱이 자기 버전을
+ * 그 값으로 알리고, 릴리스의 `latest.yml` 에 적힌 값과 비교해 새 버전인지 판단한다.
+ * 화면에 보이는 버전을 따로 적어두면 "화면엔 beta 인데 업데이트는 0.3.0 을 말하는" 꼴이
+ * 되므로, 손으로 적는 자리를 아예 없앴다.
  */
-export const VERSION_LABEL = 'v.BETA'
+export const APP_VERSION: string = __APP_VERSION__
+export const VERSION_LABEL = `v${APP_VERSION}`
+
+/** 자동 업데이트가 실패했을 때 손으로 받으러 가는 곳 */
+export const RELEASES_URL = 'https://github.com/Redater2254/endcredit/releases/latest'
 
 /**
  * Redirect URI(`http://localhost:7396/auth/callback`)에 박혀 있는 포트라 **선택지가 아니다**.

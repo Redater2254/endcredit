@@ -15,6 +15,7 @@ import type { CreditData } from '@shared/aggregate'
 const SlideThumb = memo(
   function SlideThumb({
     slide,
+    smarts,
     canvasW,
     canvasH,
     fontFamily,
@@ -25,6 +26,8 @@ const SlideThumb = memo(
     ratio
   }: {
     slide: Slide
+    /** 고급 개체 보관함 — 없으면 썸네일에서 고급 개체가 빈 칸으로 나온다 */
+    smarts: Deck['smarts']
     canvasW: number
     canvasH: number
     fontFamily: string
@@ -41,9 +44,10 @@ const SlideThumb = memo(
         author: '',
         canvas: { width: canvasW, height: canvasH },
         font: { family: fontFamily },
+        smarts,
         slides: [slide]
       }),
-      [slide, canvasW, canvasH, fontFamily]
+      [slide, smarts, canvasW, canvasH, fontFamily]
     )
 
     return (
@@ -59,6 +63,8 @@ const SlideThumb = memo(
   },
   (a, b) =>
     a.slide === b.slide &&
+    // 보관함이 바뀌면 그 개체를 쓰는 썸네일도 다시 그려야 한다
+    a.smarts === b.smarts &&
     a.data === b.data &&
     a.width === b.width &&
     a.scale === b.scale &&
@@ -175,6 +181,7 @@ export function SlidePanel({
 
               <SlideThumb
                 slide={slide}
+                smarts={deck.smarts}
                 canvasW={deck.canvas.width}
                 canvasH={deck.canvas.height}
                 fontFamily={deck.font.family}

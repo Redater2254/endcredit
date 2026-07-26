@@ -11,6 +11,7 @@ import {
 import { basename, extname, join } from 'node:path'
 import { app, dialog } from 'electron'
 import { SERVER_PORT } from '@shared/constants'
+import { lastDir, rememberDir } from './settings'
 
 /**
  * 사용자가 넣은 이미지·오디오.
@@ -97,23 +98,32 @@ export function assetFileFromUrl(url: string): string | null {
   return m ? decodeURIComponent(m[1]) : null
 }
 
+/** 끌어다 놓기·파일 창이 함께 쓰는 목록. 여기 없는 확장자는 이미지로 안 본다. */
+export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'apng']
+export const AUDIO_EXTS = ['mp3', 'ogg', 'wav', 'm4a', 'aac', 'flac', 'opus', 'webm']
+
 export async function pickAudio(): Promise<Asset | null> {
   const result = await dialog.showOpenDialog({
     title: '소리 파일 선택',
+    // 지난번에 고른 폴더에서 시작한다 — 매번 다운로드 폴더로 돌아가면 파일 찾기가 고역이다
+    defaultPath: lastDir('audio'),
     properties: ['openFile'],
-    filters: [{ name: '오디오', extensions: ['mp3', 'ogg', 'wav', 'm4a', 'aac', 'flac', 'opus', 'webm'] }]
+    filters: [{ name: '오디오', extensions: AUDIO_EXTS }]
   })
   if (result.canceled || result.filePaths.length === 0) return null
+  rememberDir('audio', result.filePaths[0])
   return importAssetFile(result.filePaths[0])
 }
 
 export async function pickImage(): Promise<Asset | null> {
   const result = await dialog.showOpenDialog({
     title: '이미지 선택',
+    defaultPath: lastDir('image'),
     properties: ['openFile'],
-    filters: [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'apng'] }]
+    filters: [{ name: '이미지', extensions: IMAGE_EXTS }]
   })
   if (result.canceled || result.filePaths.length === 0) return null
+  rememberDir('image', result.filePaths[0])
   return importAssetFile(result.filePaths[0])
 }
 

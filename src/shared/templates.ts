@@ -228,7 +228,7 @@ function classicRoll(): Deck {
 // ── 4. 미니멀 ──────────────────────────────────────────────
 function minimal(): Deck {
   const line = (y: number): ReturnType<typeof createShape> => {
-    const s = createShape({ x: 30, y, w: 40, h: 0.4 })
+    const s = createShape('line', { x: 30, y, w: 40, h: 0.4 })
     s.fill = '#ffffff'
     s.opacity = 35
     return s

@@ -8,6 +8,12 @@ export interface OverlayState {
   playing: boolean
   /** 재생 세대. 값이 바뀌면 처음부터 다시 재생한다. */
   generation: number
+  /**
+   * 이 장 하나만 내보내는 중이면 그 번호. null 이면 전체 재생.
+   *
+   * 40장짜리 크레딧에서 12번째 장만 OBS 로 확인하고 싶을 때 앞의 11장을 기다릴 수 없다.
+   */
+  onlySlide?: number | null
   /** 지금 보이는 데이터가 실제 방송분이 아니라 샘플인지 */
   sample: boolean
 }

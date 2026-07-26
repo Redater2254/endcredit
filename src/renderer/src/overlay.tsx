@@ -58,6 +58,7 @@ function Overlay(): React.JSX.Element {
         data={state.data}
         playing={state.playing}
         generation={state.generation}
+        onlySlide={state.onlySlide ?? null}
         audio
         onFinished={() => {
           // 총 길이는 내용 높이에 따라 달라져 메인이 알 수 없다.

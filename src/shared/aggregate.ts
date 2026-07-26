@@ -233,6 +233,17 @@ export function createAggregator(
         fromStatusPayload(p)
         break
 
+      /**
+       * 미션에 쓴 별풍선도 같은 별풍선이다.
+       *
+       * SOOP 은 도전/대결미션 참여를 `SVC_MISSION`(121) 한 통로로 보내고 일반 별풍선
+       * 패킷(`SVC_SENDBALLOON` 계열)으로는 **다시 보내지 않는다.** 그래서 여기서 안 세면
+       * 미션에 쏜 별풍선이 순위에서 통째로 빠지고, 겹쳐 세일 일도 없다.
+       * (정산 때 오는 `CHALLENGE_MISSION_SPONSORS` 는 같은 후원을 한 번 더 나열한
+       *  명단이므로 세지 않는다 — 그걸 같이 세면 정확히 두 배가 된다)
+       */
+      case 'CHALLENGE_MISSION_GIFTED':
+      case 'BATTLE_MISSION_GIFTED':
       case 'BALLOON_GIFTED':
       case 'ADBALLOON_GIFTED':
       case 'VIDEOBALLOON_GIFTED': {

@@ -11,6 +11,7 @@ userData/
 *.log
 .DS_Store
 DESIGN.md
+logo/
 
 # 브랜드 원본 (PSD·고해상도 원본은 저장소에 두지 않는다)
 brand/*.psd

@@ -264,6 +264,20 @@ export const EFFECTS: Effect[] = [
     defaultEasing: BACK_OUT,
     suggestStagger: 55
   },
+  {
+    id: 'typewriter',
+    name: '타자기',
+    description: '글자가 왼쪽부터 한 칸씩 찍히듯 나타남',
+    category: 'in',
+    // steps() 를 keyframe 안에서 걸어야 리빌이 뚝뚝 끊겨 타자처럼 보인다.
+    // 왼→오로 드러나므로 왼쪽 정렬 글자에 가장 잘 어울린다.
+    frames: `
+      0% { clip-path: inset(0 100% 0 0); opacity: 1; animation-timing-function: steps(22, end) }
+      to { clip-path: inset(0 0 0 0); opacity: 1 }`,
+    defaultDurationMs: 1100,
+    defaultEasing: 'linear',
+    suggestStagger: 40
+  },
 
   // ── 강조 ──────────────────────────────────────────
   {
@@ -273,7 +287,7 @@ export const EFFECTS: Effect[] = [
     category: 'emphasis',
     frames: `
       0%,100% { transform: scale(1) }
-      50%     { transform: scale(1.08) }`,
+      50%     { transform: scale(calc(1 + 0.08 * var(--fx-amp, 1))) }`,
     defaultDurationMs: 900,
     defaultEasing: 'ease-in-out',
     suggestStagger: 0
@@ -285,12 +299,40 @@ export const EFFECTS: Effect[] = [
     category: 'emphasis',
     frames: `
       0%,100% { transform: translateX(0) }
-      20%     { transform: translateX(-9px) }
-      40%     { transform: translateX(8px) }
-      60%     { transform: translateX(-5px) }
-      80%     { transform: translateX(3px) }`,
+      20%     { transform: translateX(calc(-9px * var(--fx-amp, 1))) }
+      40%     { transform: translateX(calc(8px * var(--fx-amp, 1))) }
+      60%     { transform: translateX(calc(-5px * var(--fx-amp, 1))) }
+      80%     { transform: translateX(calc(3px * var(--fx-amp, 1))) }`,
     defaultDurationMs: 600,
     defaultEasing: 'ease-in-out',
+    suggestStagger: 0
+  },
+  {
+    id: 'jitter',
+    name: '부르르',
+    description: '위아래·좌우·대각선으로 제멋대로 떨림 (세기·속도 조절)',
+    category: 'emphasis',
+    /*
+     * CSS 에는 난수가 없다. 대신 규칙이 안 보이는 열두 걸음을 손으로 찍어 두면
+     * 눈에는 제멋대로 떠는 것으로 보인다. 세기는 `--fx-amp` 를 곱해 조절한다 —
+     * 값 하나로 전체 진폭이 같이 커지고 작아진다.
+     */
+    frames: `
+      0%   { transform: translate(0, 0) }
+      8%   { transform: translate(calc(5px * var(--fx-amp, 1)), calc(-3px * var(--fx-amp, 1))) }
+      17%  { transform: translate(calc(-4px * var(--fx-amp, 1)), calc(-6px * var(--fx-amp, 1))) }
+      25%  { transform: translate(calc(-7px * var(--fx-amp, 1)), calc(2px * var(--fx-amp, 1))) }
+      33%  { transform: translate(calc(3px * var(--fx-amp, 1)), calc(6px * var(--fx-amp, 1))) }
+      42%  { transform: translate(calc(7px * var(--fx-amp, 1)), calc(-1px * var(--fx-amp, 1))) }
+      50%  { transform: translate(calc(-2px * var(--fx-amp, 1)), calc(-7px * var(--fx-amp, 1))) }
+      58%  { transform: translate(calc(-6px * var(--fx-amp, 1)), calc(4px * var(--fx-amp, 1))) }
+      67%  { transform: translate(calc(1px * var(--fx-amp, 1)), calc(7px * var(--fx-amp, 1))) }
+      75%  { transform: translate(calc(6px * var(--fx-amp, 1)), calc(3px * var(--fx-amp, 1))) }
+      83%  { transform: translate(calc(-5px * var(--fx-amp, 1)), calc(-2px * var(--fx-amp, 1))) }
+      92%  { transform: translate(calc(2px * var(--fx-amp, 1)), calc(-5px * var(--fx-amp, 1))) }
+      100% { transform: translate(0, 0) }`,
+    defaultDurationMs: 700,
+    defaultEasing: 'linear',
     suggestStagger: 0
   },
   {
@@ -300,7 +342,7 @@ export const EFFECTS: Effect[] = [
     category: 'emphasis',
     frames: `
       0%,100% { text-shadow: 0 2px 8px rgba(0,0,0,.85) }
-      50%     { text-shadow: 0 0 18px currentColor, 0 0 34px currentColor, 0 2px 8px rgba(0,0,0,.85) }`,
+      50%     { text-shadow: 0 0 calc(18px * var(--fx-amp, 1)) currentColor, 0 0 calc(34px * var(--fx-amp, 1)) currentColor, 0 2px 8px rgba(0,0,0,.85) }`,
     defaultDurationMs: 1400,
     defaultEasing: 'ease-in-out',
     suggestStagger: 120
@@ -312,10 +354,23 @@ export const EFFECTS: Effect[] = [
     category: 'emphasis',
     frames: `
       0%,100% { transform: translateY(0) }
-      50%     { transform: translateY(-12px) }`,
+      50%     { transform: translateY(calc(-12px * var(--fx-amp, 1))) }`,
     defaultDurationMs: 2400,
     defaultEasing: 'ease-in-out',
     suggestStagger: 150
+  },
+  {
+    id: 'ticker',
+    name: '흐르는 자막',
+    description: '오른쪽에서 왼쪽으로 계속 흘러 지나감 (가로로 넓은 글상자에 잘 맞음)',
+    category: 'emphasis',
+    // 자기 폭의 105% 만큼 오가므로, 화면 전체를 지나가게 하려면 글상자를 넓게 둔다
+    frames: `
+      from { transform: translateX(105%) }
+      to   { transform: translateX(-105%) }`,
+    defaultDurationMs: 6000,
+    defaultEasing: 'linear',
+    suggestStagger: 0
   },
 
   // ── 퇴장 ──────────────────────────────────────────

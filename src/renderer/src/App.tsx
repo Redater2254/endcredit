@@ -7,6 +7,7 @@ import type { OverlayInfo } from '@shared/overlay'
 import { Editor } from './Editor'
 import markUrl from './assets/mark.png'
 import { VERSION_LABEL } from '@shared/constants'
+import { UpdateChip } from './UpdateChip'
 
 type Tab = 'broadcast' | 'editor'
 type Theme = 'dark' | 'light'
@@ -118,6 +119,8 @@ export default function App(): React.JSX.Element {
         <img className="brand-mark" src={markUrl} alt="" />
         <h1>endcredit</h1>
         <span className="ver">{VERSION_LABEL}</span>
+        {/* 버전 바로 옆이 제자리다. 머리말은 두 탭이 함께 쓰므로 방송 탭에서도 보인다 */}
+        <UpdateChip />
         <div className="spacer" />
         <nav className="tabs">
           <button

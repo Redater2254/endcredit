@@ -21,7 +21,7 @@ import {
   stopCollecting
 } from './collector'
 import { currentSessionDir, currentStats } from './session'
-import { listAssets, pickAudio, pickImage } from './assets'
+import { listAssets, pickAudio, pickImage, storeAssetBytes } from './assets'
 import { openEffectWindow, registerEffectWindowIpc, type EffectResult } from './effect-window'
 import {
   backupCurrentDeck,
@@ -34,6 +34,13 @@ import {
   saveDeckAs
 } from './preset-store'
 import { creditSnapshot, pushCredit, replaySession, resetCredit } from './credit'
+import {
+  checkForUpdate,
+  downloadUpdate,
+  getUpdateState,
+  onUpdateState,
+  registerUpdater
+} from './updater'
 import {
   finishOverlay,
   getOverlayState,
@@ -128,6 +135,17 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  /**
+   * 파일을 엉뚱한 데 떨어뜨려도 창이 날아가지 않게 한다.
+   *
+   * 캔버스 밖에 그림을 놓으면 크로미움이 그 파일로 **이동해 버린다** — 편집 화면이
+   * 사라지고 사진 한 장만 남아, 사용자 눈엔 앱이 죽은 것과 같다. 되돌릴 길도 없다.
+   * 끌어다 놓기를 넣은 이상 반드시 막아야 한다.
+   */
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (url !== mainWindow?.webContents.getURL()) e.preventDefault()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -247,6 +265,12 @@ app.whenReady().then(async () => {
   // 재생 상태를 바꾸는 길이 여럿(IPC·단축키·리모컨)이라, 한 곳에서 창에 알린다
   onOverlayChanged(pushOverlay)
 
+  registerUpdater()
+  onUpdateState((s) => mainWindow?.webContents.send('update:state', s))
+  ipcMain.handle('update:get', () => getUpdateState())
+  ipcMain.handle('update:check', () => checkForUpdate(true))
+  ipcMain.handle('update:download', () => downloadUpdate())
+
   ipcMain.handle('auth:get', (): AuthState => getAuthState())
   ipcMain.handle('auth:login', () => login())
   ipcMain.handle('auth:logout', () => logout())
@@ -278,8 +302,9 @@ app.whenReady().then(async () => {
     ...getOverlayState(),
     clients: overlayClientCount()
   }))
-  ipcMain.handle('overlay:play', () => {
-    playOverlay()
+  // only 를 주면 그 장 하나만 내보낸다 (안 주면 전체)
+  ipcMain.handle('overlay:play', (_e, only?: number | null) => {
+    playOverlay(typeof only === 'number' ? only : null)
     pushOverlay()
   })
   ipcMain.handle('overlay:stop', () => {
@@ -307,6 +332,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('assets:pick-image', () => pickImage())
   ipcMain.handle('assets:pick-audio', () => pickAudio())
   ipcMain.handle('assets:list', () => listAssets())
+  // 레이어 병합으로 만든 PNG(data URL)를 에셋으로 저장한다
+  ipcMain.handle('assets:save-image', (_e, dataUrl: string) => {
+    const b64 = String(dataUrl).replace(/^data:image\/\w+;base64,/, '')
+    return storeAssetBytes('merged.png', Buffer.from(b64, 'base64'))
+  })
+  /**
+   * 탐색기에서 끌어다 놓은 파일을 담는다.
+   *
+   * 경로가 아니라 **내용**을 받는다. Electron 32 부터 렌더러에서 `File.path` 가 사라져
+   * 경로를 알 수 없고, 어차피 에셋 폴더로 복사할 것이므로 바이트만 있으면 충분하다.
+   * 같은 내용이 이미 있으면 `storeAssetBytes` 가 그걸 재사용한다.
+   */
+  ipcMain.handle('assets:import-bytes', (_e, name: string, bytes: ArrayBuffer) =>
+    storeAssetBytes(String(name || 'dropped'), Buffer.from(bytes))
+  )
   ipcMain.handle('app:info', () => ({
     remoteUrl: `http://localhost:${SERVER_PORT}/remote`,
     overlayUrl: `http://localhost:${SERVER_PORT}/overlay`,
@@ -397,6 +437,13 @@ app.whenReady().then(async () => {
 
   await restoreSession()
   push(getAuthState())
+
+  /*
+   * 새 버전 확인은 **켠 직후를 피해서** 한 번만 한다.
+   * 시작할 때는 서버·인증·창을 세우느라 바쁘고, 업데이트는 몇 초 늦어도 아무 문제가 없다.
+   * (방송 중이면 updater 가 알아서 건너뛴다)
+   */
+  setTimeout(() => void checkForUpdate(), 8_000)
 
   app.on('second-instance', showWindow)
   app.on('activate', showWindow)

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { app } from 'electron'
 
 /**
@@ -11,6 +11,24 @@ import { app } from 'electron'
 export interface Settings {
   /** 창을 닫으면 트레이로 내려간다는 안내를 이미 보여줬는지 */
   trayHintShown?: boolean
+  /**
+   * 파일 창을 마지막으로 열었던 폴더. **종류별로 따로** 기억한다.
+   * 하나로 합치면 소리를 넣은 뒤 이미지를 고르려는데 음악 폴더가 열린다.
+   */
+  lastDirs?: Record<string, string>
+}
+
+/** 파일 창의 시작 위치. 없거나 지워진 폴더면 `undefined` — OS 기본(다운로드)으로 열린다. */
+export function lastDir(kind: string): string | undefined {
+  const dir = getSettings().lastDirs?.[kind]
+  return dir && existsSync(dir) ? dir : undefined
+}
+
+/** 고른 파일이 있던 폴더를 기억한다. 다음에 그 종류의 파일 창은 여기서 시작한다. */
+export function rememberDir(kind: string, filePath: string): void {
+  const dir = dirname(filePath)
+  if (!dir) return
+  patchSettings({ lastDirs: { ...getSettings().lastDirs, [kind]: dir } })
 }
 
 function path(): string {

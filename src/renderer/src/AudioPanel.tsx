@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { audioOf, type AudioClip, type Deck, type DeckAudio, type Slide } from '@shared/deck'
+import {
+  audioOf,
+  tuneAudio,
+  type AudioClip,
+  type Deck,
+  type DeckAudio,
+  type Slide
+} from '@shared/deck'
 import {
   builtinAudioUrl,
   builtinNameOf,
@@ -33,8 +40,8 @@ function fileNameOf(src: string): string {
   }
 }
 
-/** 고른 소리를 그 자리에서 들어보는 작은 재생기. */
-function TryButton({ clip }: { clip: AudioClip | null }): React.JSX.Element {
+/** 고른 소리를 그 자리에서 들어보는 작은 재생기. 속성 패널의 등장 효과음도 같은 것을 쓴다. */
+export function TryButton({ clip }: { clip: AudioClip | null }): React.JSX.Element {
   const elRef = useRef<HTMLAudioElement | null>(null)
   const [on, setOn] = useState(false)
 
@@ -55,7 +62,7 @@ function TryButton({ clip }: { clip: AudioClip | null }): React.JSX.Element {
     }
     if (!clip?.src) return
     const el = new Audio(clip.src)
-    el.volume = Math.max(0, Math.min(1, clip.volume / 100))
+    tuneAudio(el, clip)
     el.onended = () => setOn(false)
     void el.play().catch(() => setOn(false))
     elRef.current = el
@@ -74,7 +81,8 @@ function ClipRow({
   onChange,
   emptyLabel,
   presets,
-  defaultVolume
+  defaultVolume,
+  pitch = false
 }: {
   clip: AudioClip | null
   onChange: (next: AudioClip | null) => void
@@ -82,6 +90,8 @@ function ClipRow({
   /** 앱이 기본으로 들고 있는 소리들 */
   presets: BuiltinAudio[]
   defaultVolume: number
+  /** 음 높이 조절을 보여줄지. 배경음악은 곡이 통째로 빨라져서 쓸 일이 없다 */
+  pitch?: boolean
 }): React.JSX.Element {
   async function pick(): Promise<void> {
     const asset = await window.endcredit.assets.pickAudio()
@@ -142,7 +152,47 @@ function ClipRow({
           />
         </Field>
       )}
+      {clip?.src && pitch && <PitchField clip={clip} onChange={onChange} />}
     </>
+  )
+}
+
+/**
+ * 음 높이 (반음).
+ *
+ * 브라우저에는 음정만 바꾸는 기능이 없어서 **테이프를 빨리 감는 방식**이다 —
+ * 올리면 그만큼 짧아진다. 짧은 효과음에는 오히려 그게 자연스러워서 그대로 쓴다.
+ * 원본으로 돌리는 버튼을 같이 둔다 (0 을 슬라이더로 정확히 맞추기가 은근히 어렵다).
+ */
+export function PitchField({
+  clip,
+  onChange,
+  label = '음 높이'
+}: {
+  clip: AudioClip
+  onChange: (next: AudioClip) => void
+  label?: string
+}): React.JSX.Element {
+  const pitch = clip.pitch ?? 0
+  return (
+    <Field label={label} hint="반음 단위 · 올리면 소리도 그만큼 짧아집니다">
+      <span className="row" style={{ gap: '0.35rem', alignItems: 'center' }}>
+        <Slider
+          value={pitch}
+          min={-12}
+          max={12}
+          step={1}
+          onChange={(v) => onChange({ ...clip, pitch: v })}
+        />
+        <button
+          disabled={pitch === 0}
+          title="원래 높이로"
+          onClick={() => onChange({ ...clip, pitch: 0 })}
+        >
+          ↺
+        </button>
+      </span>
+    </Field>
   )
 }
 
@@ -213,6 +263,7 @@ export function AudioPanel({
           emptyLabel="효과음 없음"
           presets={BUILTIN_SOUNDS}
           defaultVolume={85}
+          pitch
           onChange={onSlideSound}
         />
         {withSound > 0 && (
