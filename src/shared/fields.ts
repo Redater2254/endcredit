@@ -138,7 +138,14 @@ export function resolveField(token: string, data: CreditData): string | null {
 
   if (parts[0] === 'total') {
     if (parts[1] === 'duration') return formatDuration(data.totals.durationMs)
-    const v = data.totals[parts[1] as keyof CreditData['totals']]
+    /*
+     * 토큰 이름과 집계 항목 이름이 어긋난 것이 하나 있다 — `chatters` vs `uniqueChatters`.
+     * 필드 목록이 `total.chatters` 를 알려주는데 집계에는 그 이름이 없어서, 값을 못 찾고
+     * **조용히 빈 칸으로 사라지고 있었다.** 이미 그 이름으로 쓴 문서가 있으므로 토큰을
+     * 바꾸지 않고 여기서 알아듣는다.
+     */
+    const key = parts[1] === 'chatters' ? 'uniqueChatters' : parts[1]
+    const v = data.totals[key as keyof CreditData['totals']]
     return typeof v === 'number' ? v.toLocaleString() : null
   }
 

@@ -16,7 +16,7 @@
     "verify": "esbuild scripts/verify-aggregate.ts --bundle --platform=node --format=esm --outfile=out/verify.mjs --log-level=warning && node out/verify.mjs",
     "icons": "electron scripts/make-icons.js",
     "dist": "npm run build && electron-builder --config electron-builder.config.cjs --win --publish never",
-    "release": "npm run build && electron-builder --config electron-builder.config.cjs --win --publish always",
+    "postdist": "node scripts/make-latest-yml.js",
     "dist:nokey": "node scripts/dist-nokey.js",
     "pack": "npm run build && electron-builder --config electron-builder.config.cjs --win --dir",
     "bake": "node scripts/bake-credentials.js",
