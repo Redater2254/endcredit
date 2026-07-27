@@ -76,7 +76,12 @@ function guard(req: Request, res: Response): boolean {
   return true
 }
 
-type CodeWaiter = { resolve: (code: string) => void; reject: (err: Error) => void }
+type CodeWaiter = {
+  resolve: (code: string) => void
+  reject: (err: Error) => void
+  /** 우리가 보낸 표. 돌아온 것과 대조해 남이 밀어 넣은 코드를 걸러낸다 */
+  state: string
+}
 
 let httpServer: Server | null = null
 let waiter: CodeWaiter | null = null
@@ -101,6 +106,13 @@ app.get('/overlay/stream', (req, res) => {
 // OBS 도구 › 사용자 정의 브라우저 독에 http://localhost:7396/remote 를 넣으면
 // 방송 화면에서 빠져나오지 않고 크레딧을 틀 수 있다.
 app.get('/remote', (_req, res) => {
+  /*
+   * 아무 사이트나 이 페이지를 iframe 으로 띄우면, 그 안에서 나가는 요청은 same-origin 이라
+   * `guard()` 를 통과한다 — 보이지 않는 프레임 위에 버튼을 겹쳐 **방송 중에 크레딧을
+   * 틀어버릴 수 있다.** OBS 브라우저 독은 최상위로 여는 것이라 이 헤더에 걸리지 않는다.
+   */
+  res.set('X-Frame-Options', 'DENY')
+  res.set('Content-Security-Policy', "frame-ancestors 'none'")
   res.type('html').send(remotePage())
 })
 
@@ -154,14 +166,19 @@ app.use(
     if (!guard(req, res)) return
     next()
   },
-  // 경로는 요청 시점에 구한다 — app.getPath('userData') 는 ready 이후에만 신뢰할 수 있다.
-  (req, res, next) =>
-    express.static(assetsDir(), {
+  // 경로는 **첫 요청 때** 구한다 — app.getPath('userData') 는 ready 이후에만 신뢰할 수
+  // 있어서 미리 못 만들고, 매 요청 새로 만들면 그것대로 낭비다. 한 번 만들어 두고 쓴다.
+  (req, res, next) => {
+    userAssets ??= express.static(assetsDir(), {
       // 기본값(ignore)은 점으로 시작하는 파일을 404 로 막는다.
       // 사용자가 고른 파일명을 우리가 다 통제할 수 없으므로 명시적으로 허용한다.
       dotfiles: 'allow'
-    })(req, res, next)
+    })
+    userAssets(req, res, next)
+  }
 )
+
+let userAssets: ReturnType<typeof express.static> | null = null
 
 const rendererDevUrl = process.env.ELECTRON_RENDERER_URL
 
@@ -206,6 +223,24 @@ app.get('/collector', (_req, res) => {
 app.get('/auth/callback', (req, res) => {
   const code = typeof req.query.code === 'string' ? req.query.code : null
   const error = typeof req.query.error === 'string' ? req.query.error : null
+  const given = typeof req.query.state === 'string' ? req.query.state : null
+
+  /*
+   * 이 주소는 **아무나 부를 수 있다.** 브라우저 이동이라 Origin 헤더가 없어 `guard()` 로는
+   * 막을 수 없다. 로그인을 기다리는 동안 남의 페이지가 자기 인증 코드를 밀어 넣으면
+   * **스트리머가 남의 계정으로 로그인된 채 방송하게 된다.** 그래서 우리가 보낸 표를 대조한다.
+   *
+   * 표가 아예 안 돌아온 경우는 통과시킨다 — SOOP 이 state 를 되돌려주지 않는 구현이면
+   * 로그인이 통째로 막혀버리기 때문이다. 그때는 경고만 남긴다.
+   */
+  if (waiter && given !== null && given !== waiter.state) {
+    console.warn('[auth] state 가 맞지 않는 콜백을 버렸습니다 (남이 보낸 코드일 수 있습니다)')
+    res.status(400).type('html').send(page('fail', '요청한 로그인이 아닙니다. 앱에서 다시 시도하세요.'))
+    return
+  }
+  if (waiter && given === null) {
+    console.warn('[auth] 콜백에 state 가 없습니다 — 대조를 건너뜁니다')
+  }
 
   if (code && waiter) {
     waiter.resolve(code)
@@ -240,8 +275,11 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)
 }
 
-/** 다음으로 도착할 인증 코드 하나를 기다린다. */
-export function awaitAuthCode(timeoutMs = 5 * 60_000): Promise<string> {
+/**
+ * 다음으로 도착할 인증 코드 하나를 기다린다.
+ * `state` 는 이 로그인 시도의 표다 — 콜백으로 되돌아온 값과 대조한다.
+ */
+export function awaitAuthCode(state: string, timeoutMs = 5 * 60_000): Promise<string> {
   if (waiter) waiter.reject(new Error('새 로그인 시도로 취소되었습니다.'))
 
   return new Promise<string>((resolve, reject) => {
@@ -251,6 +289,7 @@ export function awaitAuthCode(timeoutMs = 5 * 60_000): Promise<string> {
     }, timeoutMs)
 
     waiter = {
+      state,
       resolve: (code) => {
         clearTimeout(timer)
         resolve(code)

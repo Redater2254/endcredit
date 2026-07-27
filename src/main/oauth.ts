@@ -25,15 +25,19 @@ interface TokenResponse {
  * 사용자를 보낼 로그인/동의 URL.
  * redirect_uri 는 넘기지 않는다 — SOOP 는 Developers 에 **등록된** Redirect URI 로 되돌려준다.
  */
-export function authorizeUrl(creds: Credentials): string {
+export function authorizeUrl(creds: Credentials, state: string): string {
   const u = new URL('/auth/code', SOOP_API_BASE)
   u.searchParams.set('client_id', creds.clientId)
+  // 콜백으로 되돌아오는 표. 남이 밀어 넣은 인증 코드를 걸러내는 유일한 수단이다
+  u.searchParams.set('state', state)
   return u.toString()
 }
 
 async function requestToken(body: URLSearchParams): Promise<TokenSet> {
   const res = await fetch(new URL('/auth/token', SOOP_API_BASE), {
     method: 'POST',
+    // 응답이 안 오면 로그인이 영영 매달린다 — 기다리다 포기할 줄 알아야 한다
+    signal: AbortSignal.timeout(20_000),
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       Accept: '*/*'

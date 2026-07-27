@@ -3,6 +3,7 @@ import type { StationInfo } from '@shared/types'
 
 async function postForm(path: string, params: Record<string, string>): Promise<unknown> {
   const res = await fetch(new URL(path, SOOP_API_BASE), {
+    signal: AbortSignal.timeout(20_000),
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: '*/*' },
     body: new URLSearchParams(params)

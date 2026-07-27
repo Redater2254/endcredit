@@ -34,6 +34,17 @@ function currentPath(): string {
   return join(app.getPath('userData'), 'current-preset.json')
 }
 
+/**
+ * IPC 로 받은 파일명이 **프리셋 폴더를 벗어나지 못하게** 한다.
+ * `../../../x.json` 같은 값이 오면 폴더 부분을 떼고 파일명만 쓴다.
+ */
+function insideBaseDir(file: string): string {
+  return join(baseDir(), basename(file))
+}
+
+/** 초기화 직전에 남기는 백업 — 저장 목록에는 나오지 않아야 한다 */
+const BACKUP_PREFIX = 'backup-'
+
 /** 파일명으로 쓸 수 없는 문자를 걸러낸다. 프리셋 이름은 사용자가 자유롭게 짓는다. */
 function safeName(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'preset'
@@ -65,7 +76,7 @@ export function loadCurrentDeck(): Deck {
 export function backupCurrentDeck(): string | null {
   const p = currentPath()
   if (!existsSync(p)) return null
-  const dest = join(baseDir(), `backup-${Date.now()}.json`)
+  const dest = join(baseDir(), `${BACKUP_PREFIX}${Date.now()}.json`)
   writeFileAtomic(dest, readFileSync(p, 'utf8'))
   return dest
 }
@@ -81,7 +92,8 @@ export interface SavedDeck {
 
 export function listDecks(): SavedDeck[] {
   return readdirSync(baseDir())
-    .filter((f) => f.endsWith('.json'))
+    // 백업은 사용자가 이름 붙여 저장한 것이 아니다. 목록에 쌓이면 쓰레기가 된다
+    .filter((f) => f.endsWith('.json') && !f.startsWith(BACKUP_PREFIX))
     .map((file) => {
       try {
         const p = JSON.parse(readFileSync(join(baseDir(), file), 'utf8')) as Deck
@@ -100,11 +112,11 @@ export function saveDeckAs(preset: Deck, name: string): SavedDeck {
 }
 
 export function loadDeckFile(file: string): Deck {
-  return toDeck(JSON.parse(readFileSync(join(baseDir(), file), 'utf8')))
+  return toDeck(JSON.parse(readFileSync(insideBaseDir(file), 'utf8')))
 }
 
 export function deleteDeckFile(file: string): void {
-  const p = join(baseDir(), file)
+  const p = insideBaseDir(file)
   if (existsSync(p)) unlinkSync(p)
 }
 

@@ -26,6 +26,20 @@ export function UpdateChip(): React.JSX.Element | null {
     await window.endcredit.update.check()
   }
 
+  /**
+   * 지금 설치. 방송 중이면 **한 번 물어본다** — 모르고 누르면 하루치 수집이 끊긴다.
+   */
+  async function install(): Promise<void> {
+    const r = await window.endcredit.update.install()
+    if (!r.busy) return
+    const ok = window.confirm(
+      '지금 수집 중이거나 크레딧을 송출하는 중입니다.\n' +
+        '설치하면 앱이 껐다 켜지면서 모으던 채팅 기록이 그 자리에서 끊깁니다.\n\n' +
+        '그래도 지금 설치할까요?'
+    )
+    if (ok) await window.endcredit.update.install(true)
+  }
+
   if (state.kind === 'available') {
     return (
       <span className="upd" title={state.notes ?? undefined}>
@@ -52,9 +66,16 @@ export function UpdateChip(): React.JSX.Element | null {
     return (
       <span
         className="upd done"
-        title="지금 방송 중이라면 그대로 두세요 — 앱을 끄는 순간 조용히 설치되고, 끝나면 앱이 스스로 다시 켜집니다"
+        title={
+          '누르면 앱이 껐다 켜지면서 설치됩니다.\n' +
+          '방송 중이라면 나중에 눌러도 됩니다 — 트레이의 ‘완전히 종료’ 로 끌 때도 설치됩니다.\n' +
+          '(창의 X 는 트레이로 내려가는 것이라 설치되지 않습니다)'
+        }
       >
-        <b>{state.version}</b> 준비됨 · 끄면 설치 후 다시 켜짐
+        <b>{state.version}</b> 준비됨
+        <button className="primary" onClick={() => void install()}>
+          지금 설치
+        </button>
       </span>
     )
   }

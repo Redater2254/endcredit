@@ -1,4 +1,5 @@
 import { shell } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { credentialsError, loadCredentials } from './config'
 import { AuthRejectedError, authorizeUrl, exchangeCode, refreshTokens } from './oauth'
 import { clearTokens, loadTokens, saveTokens, type TokenSet } from './tokens'
@@ -75,9 +76,11 @@ export async function login(): Promise<void> {
 
   setState({ status: 'logging-in' })
   try {
+    // 이 로그인 시도의 표. 콜백이 같은 값을 들고 와야 우리 것이다
+    const state = randomUUID()
     // 코드 대기를 먼저 걸어두고 브라우저를 연다 (반대 순서면 빠른 콜백을 놓칠 수 있다)
-    const codePromise = awaitAuthCode()
-    await shell.openExternal(authorizeUrl(creds))
+    const codePromise = awaitAuthCode(state)
+    await shell.openExternal(authorizeUrl(creds, state))
 
     const code = await codePromise
     tokens = await exchangeCode(creds, code)

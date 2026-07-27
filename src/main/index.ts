@@ -38,6 +38,7 @@ import { creditSnapshot, pushCredit, replaySession, resetCredit } from './credit
 import {
   checkForUpdate,
   downloadUpdate,
+  installNow,
   getUpdateState,
   onUpdateState,
   registerUpdater
@@ -82,7 +83,12 @@ let hotkeyState: { accelerator: string; label: string; registered: boolean }[] =
  * 프로세스가 뜨면 포트 7396(고정)을 못 잡고 죽는다 — 대신 **원래 창을 띄워준다.**
  */
 if (!app.requestSingleInstanceLock()) {
-  app.quit()
+  /*
+   * `app.quit()` 만 부르면 **이 모듈이 계속 실행된다** — 두 번째 프로세스가 whenReady 까지
+   * 가서 포트 7396 을 잡으려다 실패하고, 원래 앱까지 헷갈리게 만든다. 그 자리에서 끝낸다.
+   * (원래 창을 띄우는 일은 첫 번째 프로세스의 'second-instance' 가 한다)
+   */
+  app.exit(0)
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -274,6 +280,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('update:get', () => getUpdateState())
   ipcMain.handle('update:check', () => checkForUpdate(true))
   ipcMain.handle('update:download', () => downloadUpdate())
+  // 끄는 것 말고 **지금** 설치하는 길. 방송 중이면 busy 로 돌려보내 렌더러가 한 번 묻는다
+  ipcMain.handle('update:install', (_e, force?: boolean) => installNow(Boolean(force)))
 
   /** UI 크기 — 창이 놓인 화면에 따라 달라지므로 값과 실제 적용치를 함께 준다 */
   ipcMain.handle('ui:scale-get', () => ({

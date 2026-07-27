@@ -915,10 +915,15 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
           onFinished={() => {}}
         />
       )
-      // 두 프레임 기다려 정지 화면이 실제로 그려지게 한다
-      await new Promise<void>((r) =>
+      /*
+       * 두 프레임 기다려 정지 화면이 실제로 그려지게 한다.
+       * 다만 **창이 가려지면 rAF 가 아예 안 돌아 여기서 영영 멈춘다.** 시간 제한을 같이
+       * 걸어 둔다 — 먼저 오는 쪽이 이긴다(Promise 는 두 번 풀려도 문제없다).
+       */
+      await new Promise<void>((r) => {
         requestAnimationFrame(() => requestAnimationFrame(() => r()))
-      )
+        setTimeout(r, 300)
+      })
       await inlineImages(stage)
 
       const xml =

@@ -24,7 +24,13 @@ export default defineConfig({
     }
   },
   preload: {
+    // main·renderer 와 같은 것을 준다. 지금은 전부 `import type` 이라 지워져서 통과하지만,
+    // 값 하나만 가져오는 순간 빌드가 깨진다 — 그때 원인을 찾느니 미리 맞춰 둔다.
+    define,
     plugins: [externalizeDepsPlugin()],
+    resolve: {
+      alias: { '@shared': resolve(__dirname, 'src/shared') }
+    },
     build: {
       rollupOptions: {
         input: {

@@ -6,7 +6,7 @@ import { DeckRenderer } from '@shared/DeckRenderer'
 import type { OverlayInfo } from '@shared/overlay'
 import { Editor } from './Editor'
 import markUrl from './assets/mark.png'
-import { VERSION_LABEL } from '@shared/constants'
+import { SERVER_PORT, VERSION_LABEL } from '@shared/constants'
 import { UpdateChip } from './UpdateChip'
 
 type Tab = 'broadcast' | 'editor'
@@ -337,7 +337,7 @@ function CollectorCard({ loggedIn }: { loggedIn: boolean }): React.JSX.Element {
   )
 }
 
-const OVERLAY_URL = 'http://localhost:7396/overlay'
+const OVERLAY_URL = `http://localhost:${SERVER_PORT}/overlay`
 
 function OverlayCard({ info }: { info: OverlayInfo | null }): React.JSX.Element {
   const [copied, setCopied] = useState(false)

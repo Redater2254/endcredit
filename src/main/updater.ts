@@ -35,6 +35,8 @@ const { autoUpdater } = electronUpdater
 
 let state: UpdateState = { kind: 'idle' }
 let notify: ((s: UpdateState) => void) | null = null
+/** '지금 설치' 로 이미 설치기를 띄웠는지 — 종료 훅이 또 부르지 않게 */
+let installing = false
 
 function set(next: UpdateState): void {
   state = next
@@ -69,7 +71,8 @@ export function registerUpdater(): void {
    * 모르는 채로 설치까지 겹쳐 상태가 더 헝클어진다. (electron-updater 기본 훅과 같은 판단)
    */
   app.once('quit', (_e, exitCode) => {
-    if (exitCode !== 0 || state.kind !== 'ready') return
+    // '지금 설치' 로 이미 걸었으면 두 번 부르지 않는다
+    if (installing || exitCode !== 0 || state.kind !== 'ready') return
     /*
      * isSilent → 설치기에 `/S` (설치 창이 안 뜬다)
      * isForceRunAfter → `--force-run` (설치가 끝나면 설치기가 앱을 켠다) ← 이게 핵심
@@ -117,6 +120,31 @@ export async function checkForUpdate(manual = false): Promise<UpdateState> {
     set({ kind: 'error', message: String((err as Error)?.message ?? err) })
   }
   return state
+}
+
+/**
+ * 지금 설치하고 다시 켠다.
+ *
+ * **'끄면 설치된다' 만으로는 안 됐다.** 이 앱에서 '끈다' 가 모호하기 때문이다 — 창의 X 는
+ * 트레이로 내려가는 것이라 아무 일도 일어나지 않는다. 사용자는 껐다고 믿고 다시 켰다가
+ * "그대로네" 하고, 트레이의 '완전히 종료' 를 찾아내야만 비로소 설치된다. 그 사이에
+ * 업데이트 확인을 몇 번씩 다시 하게 된다.
+ *
+ * 그래서 **누르면 그 자리에서 끝나는 길**을 준다. `quitAndInstall` 은 설치기를
+ * `/S --force-run` 으로 띄우고 앱을 정상 종료시키며, 설치가 끝나면 설치기가 앱을 다시 켠다.
+ * 종료할 때 설치하는 길도 그대로 남는다 — 그냥 끄는 사람도 있다.
+ */
+export function installNow(force = false): { started: boolean; busy: boolean } {
+  if (state.kind !== 'ready') return { started: false, busy: false }
+  /*
+   * 방송 중에 잘못 누르면 **하루치 수집이 그 자리에서 끊긴다.** 이 앱이 지키려는 것이
+   * 그것이므로, 한 번 물어보고 나서만 진행한다.
+   */
+  if (!force && busyBroadcasting()) return { started: false, busy: true }
+
+  installing = true
+  autoUpdater.quitAndInstall(true, true)
+  return { started: true, busy: false }
 }
 
 /** 사용자가 '받기' 를 눌렀을 때만 부른다. */

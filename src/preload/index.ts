@@ -69,6 +69,9 @@ const api = {
     get: (): Promise<UpdateState> => ipcRenderer.invoke('update:get'),
     check: (): Promise<UpdateState> => ipcRenderer.invoke('update:check'),
     download: (): Promise<void> => ipcRenderer.invoke('update:download'),
+    /** 지금 설치하고 다시 켠다. 방송 중이면 `busy` 로 돌아온다 — 물어보고 force 로 다시 부른다 */
+    install: (force = false): Promise<{ started: boolean; busy: boolean }> =>
+      ipcRenderer.invoke('update:install', force),
     onChange: (fn: (s: UpdateState) => void): (() => void) => {
       const handler = (_e: unknown, s: UpdateState): void => fn(s)
       ipcRenderer.on('update:state', handler)
