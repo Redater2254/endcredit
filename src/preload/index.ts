@@ -27,6 +27,16 @@ const api = {
   server: {
     status: (): Promise<ServerStatus> => ipcRenderer.invoke('server:status')
   },
+  /**
+   * 앱 UI 크기. 화면 배율이 낮으면 껍데기가 깨알같이 작아지고, 좁은 화면에서는
+   * 반대로 자리를 다 먹는다 — 그걸 사용자가 직접 맞출 수 있게 한다.
+   */
+  ui: {
+    getScale: (): Promise<{ setting: 'auto' | number; applied: number }> =>
+      ipcRenderer.invoke('ui:scale-get'),
+    setScale: (v: 'auto' | number): Promise<{ setting: 'auto' | number; applied: number }> =>
+      ipcRenderer.invoke('ui:scale-set', v)
+  },
   collector: {
     get: (): Promise<{ status: CollectorStatus; stats: SessionStats | null }> =>
       ipcRenderer.invoke('collector:get'),

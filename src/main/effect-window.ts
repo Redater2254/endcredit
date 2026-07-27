@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 import { appIcon } from './app-icon'
+import { watchUiScale } from './ui-scale'
 
 /**
  * 효과 편집기 창.
@@ -65,6 +66,9 @@ export function openEffectWindow(
         contextIsolation: true
       }
     })
+
+    // 본 창과 UI 크기가 따로 놀면 창을 오갈 때마다 글자 크기가 바뀌어 눈이 피로하다
+    watchUiScale(win)
 
     win.on('ready-to-show', () => win?.show())
     // 창을 그냥 닫으면 취소한 것으로 본다 — 기다리는 쪽이 영영 안 풀리면 안 된다

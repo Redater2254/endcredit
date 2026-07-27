@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, shell, Tray } from 'electron'
 import { appIcon } from './app-icon'
 import { getSettings, patchSettings } from './settings'
+import { getUiScaleSetting, resolveUiScale, setUiScale, watchUiScale, type UiScale } from './ui-scale'
 import { SERVER_PORT } from './config'
 import { startServer, stopServer } from './server'
 import {
@@ -111,6 +112,9 @@ function createWindow(): void {
       contextIsolation: true
     }
   })
+
+  // 화면 배율에 맞춰 UI 크기를 맞추고, 모니터를 옮기면 따라가게 한다
+  watchUiScale(mainWindow)
 
   // 편집 화면이 넓어야 쓸 만하다 — 처음부터 최대화해서 띄운다
   mainWindow.on('ready-to-show', () => {
@@ -270,6 +274,19 @@ app.whenReady().then(async () => {
   ipcMain.handle('update:get', () => getUpdateState())
   ipcMain.handle('update:check', () => checkForUpdate(true))
   ipcMain.handle('update:download', () => downloadUpdate())
+
+  /** UI 크기 — 창이 놓인 화면에 따라 달라지므로 값과 실제 적용치를 함께 준다 */
+  ipcMain.handle('ui:scale-get', () => ({
+    setting: getUiScaleSetting(),
+    applied: mainWindow ? resolveUiScale(mainWindow) : 1
+  }))
+  ipcMain.handle('ui:scale-set', (_e, v: UiScale) => {
+    if (mainWindow) setUiScale(mainWindow, v)
+    return {
+      setting: getUiScaleSetting(),
+      applied: mainWindow ? resolveUiScale(mainWindow) : 1
+    }
+  })
 
   ipcMain.handle('auth:get', (): AuthState => getAuthState())
   ipcMain.handle('auth:login', () => login())

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { allEffects, getEffect } from '@shared/effects'
 import { isCustomId } from '@shared/custom-effect'
 import {
@@ -43,7 +43,10 @@ import type {
 import { SOURCE_OPTIONS } from './sources'
 import { EFFECT_DRAG_TYPE } from './EffectLibrary'
 import { ContextMenu, type MenuItem } from './ContextMenu'
-import { Splitter, useSplit } from './Splitter'
+import { Splitter, fitSplit, useBoxSize, useSplit } from './Splitter'
+
+/** 요소칸이 아무리 길어도 속성 패널에 남겨두는 높이 */
+const MIN_PROPS_H = 200
 import {
   CheckBox,
   ColorInput,
@@ -316,6 +319,14 @@ export function Inspector({
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [dropOn, setDropOn] = useState<string | null>(null)
   const [listH, setListH] = useSplit('elements', 210, 80, 620)
+  /**
+   * 요소칸 높이도 도크 안에서 다시 조인다. 저장값이 620 인 채로 세로가 짧은 화면에
+   * 오면 속성 패널이 통째로 밀려 나가 아무것도 못 고치게 된다.
+   * (`MIN_PROPS_H` = 속성 패널이 최소한 한두 줄은 보여야 하는 높이)
+   */
+  const dockRef = useRef<HTMLDivElement>(null)
+  const dockBox = useBoxSize(dockRef)
+  const listFit = fitSplit(listH, 80, dockBox.h, MIN_PROPS_H)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
@@ -470,8 +481,8 @@ export function Inspector({
   }
 
   return (
-    <div className="ps-dock">
-      <div className="ps-panel ps-layers" style={{ height: listH, flex: 'none' }}>
+    <div className="ps-dock" ref={dockRef}>
+      <div className="ps-panel ps-layers" style={{ height: listFit, flex: 'none' }}>
         <header>
           <span>요소</span>
           <em>{slide.elements.length}</em>
@@ -650,7 +661,7 @@ export function Inspector({
         </div>
       </div>
 
-      <Splitter axis="y" value={listH} onChange={setListH} />
+      <Splitter axis="y" value={listFit} onChange={setListH} />
 
       <div className="ps-panel ps-props">
         <header>

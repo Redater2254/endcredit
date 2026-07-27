@@ -50,7 +50,7 @@ import { SelectionBox } from './SelectionBox'
 import { MultiSelectionBox, boundingBox } from './MultiSelectionBox'
 import { useCanvasNav } from './useCanvasNav'
 import type { Guide } from './snap'
-import { Splitter, useSplit } from './Splitter'
+import { Splitter, fitSides, fitSplit, useBoxSize, useSplit } from './Splitter'
 import { DeckMenu } from './DeckMenu'
 import { HelpModal } from './HelpModal'
 import { TemplateGallery } from './TemplateGallery'
@@ -72,6 +72,17 @@ type Tool = 'move' | 'lasso' | 'draw'
 
 /** 캔버스에 끌어다 놓을 수 있는 그림 파일 (main 의 `IMAGE_EXTS` 와 같아야 한다) */
 const IMAGE_DROP = /\.(png|jpe?g|gif|webp|svg|apng)$/i
+
+/**
+ * 좌우 패널이 아무리 넓어도 캔버스에 남겨두는 몫.
+ *
+ * 캔버스가 이보다 좁으면 슬라이드가 우표만 해져서 편집이 불가능하다 — 패널을
+ * 조여서라도 여기는 지킨다. 세로도 같은 이유로 효과 서랍이 화면을 다 먹지 못하게 한다.
+ */
+const MIN_STAGE_W = 380
+const MIN_STAGE_H = 260
+/** `.pp-body` 의 여백 4칸(8px) + 나눔막대 2개(7px) — 패널이 쓸 수 없는 폭 */
+const BODY_GAPS = 8 * 4 + 7 * 2
 
 /**
  * 그림의 원래 가로:세로.
@@ -214,6 +225,24 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   const [leftW, setLeftW] = useSplit('left', 210, 120, 560)
   const [rightW, setRightW] = useSplit('right', 320, 220, 680)
   const [libH, setLibH] = useSplit('lib', 250, 84, 620)
+
+  /**
+   * 저장된 패널 크기를 **지금 창에 맞춰** 다시 조인다.
+   *
+   * 저장값은 절대 px 이고 한계도 고정 상수라서, 큰 모니터에서 넓게 벌려둔 값이
+   * 좁은 화면에서도 그대로 되살아난다. 4K(2194px)에서 좌 426 · 우 380 으로 벌려두면
+   * 1366 노트북에서는 캔버스에 500px 밖에 안 남고, 한계까지 벌려둔 경우(560+680)는
+   * **아예 음수라 화면이 통째로 넘친다.** 화면 배율을 바꿔도 CSS px 폭이 달라지므로
+   * 같은 일이 일어난다 — 사용자가 "배율 바꾸면 UI 가 무너진다"고 한 게 이것이다.
+   *
+   * 조인 값은 저장하지 않는다. 큰 모니터로 돌아오면 원래 배치가 그대로 복구된다.
+   */
+  const ppRef = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const ppBox = useBoxSize(ppRef)
+  const bodyBox = useBoxSize(bodyRef)
+  const fitted = fitSides(bodyBox.w, leftW, rightW, 120, 220, MIN_STAGE_W + BODY_GAPS)
+  const libFit = fitSplit(libH, 84, ppBox.h, MIN_STAGE_H)
 
   /** 이 장만 재생해보는 미리보기 */
   /** 아래 서랍: 효과 / 데이터 */
@@ -1927,7 +1956,7 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
   const scrubbing = seekInSlide !== null
 
   return (
-    <div className="pp">
+    <div className="pp" ref={ppRef}>
       <div className="ps-optionbar">
         <span className="ps-doc">
           {deck.name}
@@ -2007,7 +2036,8 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
 
       <div
         className="pp-body"
-        style={{ gridTemplateColumns: `${leftW}px 7px minmax(0, 1fr) 7px ${rightW}px` }}
+        ref={bodyRef}
+        style={{ gridTemplateColumns: `${fitted.left}px 7px minmax(0, 1fr) 7px ${fitted.right}px` }}
       >
         <SlidePanel
           deck={deck}
@@ -2066,7 +2096,8 @@ export function Editor({ info }: { info: OverlayInfo | null }): React.JSX.Elemen
           onDropScreenFx={applyScreenFx}
         />
 
-        <Splitter axis="x" value={leftW} onChange={setLeftW} />
+        {/* 화면에 보이는 값에서 끌기 시작해야 손잡이가 튀지 않는다 (조여진 값일 수 있다) */}
+        <Splitter axis="x" value={fitted.left} onChange={setLeftW} />
 
         <div className="pp-stage">
           <div className="pp-tools">
@@ -2557,7 +2588,7 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
           </div>
         </div>
 
-        <Splitter axis="x" value={rightW} onChange={setRightW} invert />
+        <Splitter axis="x" value={fitted.right} onChange={setRightW} invert />
 
         <Inspector
           slide={slide}
@@ -2629,9 +2660,9 @@ Ctrl+T 자유 변형 · 두 번 클릭 글자 편집 · 화살표 미세 이동 
         />
       )}
 
-      <Splitter axis="y" value={libH} onChange={setLibH} invert />
+      <Splitter axis="y" value={libFit} onChange={setLibH} invert />
 
-      <div className="dock-wrap" style={{ height: libH, flex: 'none', minHeight: 0 }}>
+      <div className="dock-wrap" style={{ height: libFit, flex: 'none', minHeight: 0 }}>
         <div className="dock-tabs">
           <button
             className={dock === 'effects' ? 'active' : ''}

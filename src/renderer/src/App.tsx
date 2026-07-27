@@ -79,6 +79,59 @@ function ThemeButton({ theme, onToggle }: { theme: Theme; onToggle: () => void }
   )
 }
 
+/** 고를 수 있는 UI 크기. `main/ui-scale.ts` 의 `UI_SCALE_STEPS` 와 같아야 한다. */
+const SCALE_STEPS = [0.8, 0.9, 1, 1.1, 1.25, 1.5]
+
+/**
+ * UI 크기 고르기.
+ *
+ * 화면 배율을 낮추면(4K 를 100% 로) 이 앱의 껍데기는 고정 px 이라 물리적으로
+ * 깨알같이 작아지고, 좁은 노트북에서는 반대로 껍데기가 자리를 다 먹는다.
+ * 포토샵의 `인터페이스 → UI 크기 조정` 과 같은 자리다.
+ */
+function ScaleButton(): React.JSX.Element {
+  const [state, setState] = useState<{ setting: 'auto' | number; applied: number } | null>(null)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    window.endcredit.ui.getScale().then(setState)
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    const close = (): void => setOpen(false)
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [open])
+
+  const pick = (v: 'auto' | number): void => {
+    window.endcredit.ui.setScale(v).then(setState)
+    setOpen(false)
+  }
+
+  const label = state ? `${Math.round(state.applied * 100)}%` : '…'
+
+  return (
+    <div className="scale-btn-wrap" onPointerDown={(e) => e.stopPropagation()}>
+      <button className="theme-btn scale-btn" onClick={() => setOpen((o) => !o)} title="UI 크기">
+        {label}
+      </button>
+      {open && state && (
+        <ul className="scale-menu">
+          <li className={state.setting === 'auto' ? 'on' : ''} onClick={() => pick('auto')}>
+            자동 <em>화면에 맞춤</em>
+          </li>
+          {SCALE_STEPS.map((v) => (
+            <li key={v} className={state.setting === v ? 'on' : ''} onClick={() => pick(v)}>
+              {Math.round(v * 100)}%
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function App(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('broadcast')
   const [theme, toggleTheme] = useTheme()
@@ -133,6 +186,7 @@ export default function App(): React.JSX.Element {
             크레딧 에디터
           </button>
         </nav>
+        <ScaleButton />
         <ThemeButton theme={theme} onToggle={toggleTheme} />
       </header>
 

@@ -50,8 +50,11 @@ export function UpdateChip(): React.JSX.Element | null {
 
   if (state.kind === 'ready') {
     return (
-      <span className="upd done" title="지금 방송 중이라면 그대로 두세요 — 끌 때 설치됩니다">
-        <b>{state.version}</b> 준비됨 · 앱을 끄면 설치
+      <span
+        className="upd done"
+        title="지금 방송 중이라면 그대로 두세요 — 앱을 끄는 순간 조용히 설치되고, 끝나면 앱이 스스로 다시 켜집니다"
+      >
+        <b>{state.version}</b> 준비됨 · 끄면 설치 후 다시 켜짐
       </span>
     )
   }

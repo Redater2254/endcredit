@@ -14,8 +14,17 @@ import type { UpdateState } from '@shared/types'
  *
  * ## 왜 스스로 재시작하지 않는가
  * 재시작하면 **수집 세션이 그 자리에서 끊긴다.** 방송 마지막에 틀 크레딧을 위해 하루치
- * 채팅을 모으고 있는데 그게 날아가면 이 앱의 존재 이유가 사라진다. 그래서
- * `quitAndInstall()` 은 어디서도 부르지 않는다 — 사용자가 앱을 끄는 그 순간에만 설치된다.
+ * 채팅을 모으고 있는데 그게 날아가면 이 앱의 존재 이유가 사라진다. 그래서 우리가 먼저
+ * 앱을 끄는 일은 없다 — 설치는 **사용자가 앱을 끄는 그 순간**에만 일어난다.
+ *
+ * ## 설치가 끝나면 다시 켠다
+ * 다만 설치가 끝난 뒤에는 앱이 **스스로 다시 올라온다.** 안 그러면 사용자는 업데이트를
+ * 받으려고 앱을 껐다가, 시작 메뉴에서 다시 찾아 켜야 한다 — 그 한 걸음에서 그냥
+ * 안 켜고 마는 사람이 생긴다. 어차피 끄는 김에 설치하는 것이므로 세션이 끊길 일도 없다.
+ *
+ * 이걸 위해 `autoInstallOnAppQuit` 을 **끄고 직접 설치한다.** electron-updater 의 기본
+ * 종료 훅은 `install(true, false)` 라 설치기에 `--force-run` 을 안 붙여서, 조용히 설치만
+ * 되고 앱은 꺼진 채로 남는다. 우리는 `install(true, true)` 로 `/S --force-run` 을 준다.
  *
  * ## 확인조차 미루는 때
  * 수집기가 돌고 있거나 크레딧이 송출 중이면 확인도 하지 않는다. 그때 할 일은 방송이지
@@ -49,8 +58,27 @@ function busyBroadcasting(): boolean {
 export function registerUpdater(): void {
   // 받는 것도 설치도 우리가 시점을 정한다
   autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = true
+  // 기본 종료 훅은 재시작을 안 시킨다 — 끄고 우리가 직접 건다 (아래 app.once('quit'))
+  autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.logger = null
+
+  /*
+   * 앱이 정말로 끝나는 순간에 설치한다.
+   *
+   * `exitCode !== 0` 이면 건너뛴다 — 비정상 종료 중에 설치기를 띄우면, 앱이 왜 죽었는지
+   * 모르는 채로 설치까지 겹쳐 상태가 더 헝클어진다. (electron-updater 기본 훅과 같은 판단)
+   */
+  app.once('quit', (_e, exitCode) => {
+    if (exitCode !== 0 || state.kind !== 'ready') return
+    /*
+     * isSilent → 설치기에 `/S` (설치 창이 안 뜬다)
+     * isForceRunAfter → `--force-run` (설치가 끝나면 설치기가 앱을 켠다) ← 이게 핵심
+     *
+     * 이름은 '끄고 설치'지만 이미 끄는 중이라 그냥 설치다. 뒤에 붙는 `app.quit()` 은
+     * 이미 종료 중인 앱에는 아무 일도 하지 않는다.
+     */
+    autoUpdater.quitAndInstall(true, true)
+  })
 
   autoUpdater.on('checking-for-update', () => set({ kind: 'checking' }))
   autoUpdater.on('update-not-available', () => set({ kind: 'current' }))
