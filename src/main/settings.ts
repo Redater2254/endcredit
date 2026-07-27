@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { writeFileAtomic } from './safe-write'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
 
@@ -56,7 +57,7 @@ export function getSettings(): Settings {
 export function patchSettings(p: Partial<Settings>): void {
   cache = { ...getSettings(), ...p }
   try {
-    writeFileSync(path(), JSON.stringify(cache, null, 2), 'utf8')
+    writeFileAtomic(path(), JSON.stringify(cache, null, 2))
   } catch (err) {
     // 설정 하나 때문에 앱이 죽을 이유는 없다
     console.warn('[settings] 저장 실패:', err)

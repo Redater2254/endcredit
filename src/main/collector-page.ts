@@ -130,6 +130,10 @@ export function collectorPage(): string {
 
   bridge.requestStart().then(function (cfg) {
     start(cfg.accessToken, cfg.clientId, cfg.clientSecret);
+  }, function (err) {
+    // 여기서 놓치면 아무 일도 안 일어난 채 '연결 중' 에 영영 멈춘다.
+    // 자격증명이 없으면 메인이 실제로 던진다 — 사용자에게 이유가 보여야 한다.
+    bridge.failed('START-FAILED', (err && err.message) || String(err));
   });
 })();
 </script>

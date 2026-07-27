@@ -1,10 +1,10 @@
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { DeckRenderer, MOTION_KEYFRAMES } from '@shared/DeckRenderer'
 import { defaultDeck } from '@shared/deck'
 import { CustomEffectStyles } from '@shared/useCustomEffects'
 import { overlayStreamUrl, serverUrl } from '@shared/constants'
-import type { OverlayState } from '@shared/overlay'
+import { OVERLAY_STALE_MS, type OverlayState } from '@shared/overlay'
 
 /**
  * OBS 브라우저 소스가 로드하는 페이지.
@@ -14,18 +14,42 @@ import type { OverlayState } from '@shared/overlay'
 function Overlay(): React.JSX.Element {
   const [state, setState] = useState<OverlayState | null>(null)
   const [connected, setConnected] = useState(false)
+  /** 앱에서 마지막으로 뭔가 온 시각. 이게 오래되면 앱이 죽은 것이다 */
+  const [stale, setStale] = useState(false)
+  const lastSeen = useRef(Date.now())
 
   useEffect(() => {
     const es = new EventSource(overlayStreamUrl(window.location))
+    const seen = (): void => {
+      lastSeen.current = Date.now()
+      setStale(false)
+    }
 
     es.addEventListener('state', (e) => {
       setState(JSON.parse((e as MessageEvent).data) as OverlayState)
       setConnected(true)
+      seen()
     })
-    es.onopen = (): void => setConnected(true)
+    // 상태가 안 바뀌어도 앱이 살아 있으면 이게 계속 온다
+    es.addEventListener('ping', seen)
+    es.onopen = (): void => {
+      setConnected(true)
+      seen()
+    }
     es.onerror = (): void => setConnected(false)
 
-    return () => es.close()
+    /*
+     * `onerror` 만으로는 부족하다 — 앱이 죽어도 연결이 반쯤 열린 채 한참 남을 수 있고,
+     * 그동안 마지막 장이 방송 화면에 박혀 있게 된다. 실제로 온 것이 있는지로 판단한다.
+     */
+    const watch = setInterval(() => {
+      if (Date.now() - lastSeen.current > OVERLAY_STALE_MS) setStale(true)
+    }, 1000)
+
+    return () => {
+      es.close()
+      clearInterval(watch)
+    }
   }, [])
 
   // 아직 앱과 연결되기 전 — OBS 화면에 아무것도 그리지 않는다 (투명 유지)
@@ -45,6 +69,14 @@ function Overlay(): React.JSX.Element {
       </div>
     )
   }
+
+  /*
+   * 앱에서 소식이 끊겼다 — **아무것도 그리지 않는다.**
+   *
+   * 앱이 죽는 순간 재생 중이었다면, 여기서 비우지 않으면 그 장이 방송 화면에 그대로
+   * 박힌 채 남는다. 안내 문구조차 띄우지 않는다 — 방송에 글자가 뜨는 것 자체가 사고다.
+   */
+  if (stale) return <div />
 
   const deck = state.deck ?? defaultDeck()
 

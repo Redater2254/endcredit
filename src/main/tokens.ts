@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, unlinkSync, mkdirSync } from 'node:fs'
+import { writeFileAtomic } from './safe-write'
 import { join } from 'node:path'
 import { app, safeStorage } from 'electron'
 
@@ -25,7 +26,7 @@ export function saveTokens(tokens: TokenSet): void {
     return
   }
   const blob = safeStorage.encryptString(JSON.stringify(tokens))
-  writeFileSync(tokenPath(), blob)
+  writeFileAtomic(tokenPath(), blob)
 }
 
 export function loadTokens(): TokenSet | null {

@@ -95,8 +95,12 @@ function spawnWindow(): void {
     }
   )
 
-  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     console.error(`[collector] 페이지 로드 실패 (${code} ${desc}): ${url}`)
+    // 로그만 찍으면 여기서 **영구 정지한다** — 서버가 아직 안 떴을 때 실제로 일어난다.
+    // -3(ABORTED)은 우리가 창을 닫아 취소된 것이므로 재시도하지 않는다.
+    if (!isMainFrame || code === -3) return
+    scheduleRetry(`load-failed ${code} ${desc}`)
   })
 
   win.loadURL(`http://127.0.0.1:${SERVER_PORT}/collector`)

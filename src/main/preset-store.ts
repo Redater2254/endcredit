@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync
+} from 'node:fs'
+import { writeFileAtomic } from './safe-write'
 import { basename, join } from 'node:path'
 import { app, dialog } from 'electron'
 import { defaultDeck, type Deck } from '@shared/deck'
@@ -38,7 +46,17 @@ export function loadCurrentDeck(): Deck {
     // 예전 버전(v1)으로 저장돼 있으면 슬라이드 모델로 변환해 이어서 쓴다
     return toDeck(JSON.parse(readFileSync(p, 'utf8')))
   } catch (err) {
-    console.warn('[preset] current-preset.json 을 읽지 못해 기본값을 씁니다:', err)
+    /*
+     * 못 읽은 파일을 **그 자리에 두면 안 된다.** 기본 문서로 시작한 뒤 저장이 한 번만
+     * 일어나면 원본을 덮어써 영영 사라진다. 먼저 옆으로 치워 두면 나중에 손으로 되살릴 수 있다.
+     */
+    const kept = `${p}.broken-${Date.now()}`
+    try {
+      renameSync(p, kept)
+      console.warn(`[preset] 문서를 읽지 못해 ${kept} 로 옮기고 기본 문서로 시작합니다:`, err)
+    } catch (mvErr) {
+      console.error('[preset] 손상된 문서를 옮기지도 못했습니다 — 저장이 덮어쓸 수 있습니다:', mvErr)
+    }
     return defaultDeck()
   }
 }
@@ -48,12 +66,12 @@ export function backupCurrentDeck(): string | null {
   const p = currentPath()
   if (!existsSync(p)) return null
   const dest = join(baseDir(), `backup-${Date.now()}.json`)
-  writeFileSync(dest, readFileSync(p, 'utf8'), 'utf8')
+  writeFileAtomic(dest, readFileSync(p, 'utf8'))
   return dest
 }
 
 export function saveCurrentDeck(preset: Deck): void {
-  writeFileSync(currentPath(), JSON.stringify(preset, null, 2), 'utf8')
+  writeFileAtomic(currentPath(), JSON.stringify(preset, null, 2))
 }
 
 export interface SavedDeck {
@@ -77,7 +95,7 @@ export function listDecks(): SavedDeck[] {
 export function saveDeckAs(preset: Deck, name: string): SavedDeck {
   const named: Deck = { ...preset, name }
   const file = `${safeName(name)}.json`
-  writeFileSync(join(baseDir(), file), JSON.stringify(named, null, 2), 'utf8')
+  writeFileAtomic(join(baseDir(), file), JSON.stringify(named, null, 2))
   return { file, name }
 }
 
@@ -173,7 +191,7 @@ export async function exportPreset(deck: Deck): Promise<ExportResult | null> {
     entries.push({ name: ASSET_DIR + file, data: bytes })
   }
 
-  writeFileSync(picked.filePath, zipSync(entries))
+  writeFileAtomic(picked.filePath, zipSync(entries))
   return { path: picked.filePath, assets: entries.length - 2, missing }
 }
 

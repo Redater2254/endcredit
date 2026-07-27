@@ -179,8 +179,21 @@ export function DeckRenderer({
   const finishRef = useRef(onFinished)
   finishRef.current = onFinished
 
+  /**
+   * 지금 장이 **시작한 시각**. 남은 시간을 매번 여기서 다시 재기 때문에, 재생 도중
+   * 몇 번을 다시 그리든 진행이 되감기지 않는다.
+   *
+   * 예전에는 `setTimeout` 을 장 길이만큼 **새로** 걸었고, 의존성에 슬라이드 객체가
+   * 들어 있었다. 오버레이는 상태를 SSE 로 받아 `JSON.parse` 하므로 **상태가 한 번 올
+   * 때마다 새 객체**가 되고, 그때마다 타이머가 0부터 다시 시작했다. 채팅이 흐르면
+   * 0.5초마다 상태가 오니 **어떤 장도 끝나지 않는다** — 4.4초짜리 장이 29초를 버틴
+   * 실제 사고가 있었다(2026-07-27 방송).
+   */
+  const startedRef = useRef<{ key: string; at: number } | null>(null)
+
   useEffect(() => {
     if (slideIndex === null) setIndex(0)
+    startedRef.current = null
   }, [generation, playing, slideIndex])
 
   // 인덱스가 지정되면 자동 진행하지 않는다 (한 장 미리보기)
@@ -189,21 +202,38 @@ export function DeckRenderer({
   const editing = slideIndex !== null
   const current = slideIndex !== null ? deck.slides[slideIndex] : slides[index]
 
-  useEffect(() => {
-    if (!auto || !current) return
-    if (current.kind === 'scroll') return // 스크롤 슬라이드는 스크롤이 끝날 때 넘어간다
+  /*
+   * 길이 계산은 deck.ts 한 곳에만 둔다 — 상태 표시와 실제 재생이 어긋나면 안 된다.
+   * 보관함(smarts)을 빼먹으면 기차가 다 지나가기 전에 다음 장으로 넘어간다.
+   */
+  const durationMs = useMemo(
+    () => (current ? slideDurationMs(current, deck.canvas.height, deck.smarts) : 0),
+    [current, deck.canvas.height, deck.smarts]
+  )
 
-    /*
-     * 길이 계산은 deck.ts 한 곳에만 둔다 — 상태 표시와 실제 재생이 어긋나면 안 된다.
-     * 보관함(smarts)을 빼먹으면 기차가 다 지나가기 전에 다음 장으로 넘어간다.
-     */
-    const timer = setTimeout(() => {
-      if (index + 1 < slides.length) setIndex(index + 1)
-      else finishRef.current?.()
-    }, slideDurationMs(current, deck.canvas.height, deck.smarts))
+  // 아래 타이머 의존성에는 **원시값만** 둔다. 객체를 넣으면 위 주석의 사고가 그대로 재발한다.
+  const currentId = current?.id ?? null
+  const isScroll = current?.kind === 'scroll'
+
+  useEffect(() => {
+    if (!auto || !currentId || isScroll) return // 스크롤 장은 스크롤이 끝날 때 넘어간다
+
+    // 장 id 까지 넣는다 — 재생 도중 목록이 바뀌면 같은 번호가 **다른 장**을 가리키게 되고,
+    // 그때 새 장이 이전 장의 시작 시각을 물려받아 곧바로 넘어가 버린다.
+    const key = `${generation}:${index}:${currentId}`
+    const started = startedRef.current?.key === key ? startedRef.current : { key, at: Date.now() }
+    startedRef.current = started
+
+    const timer = setTimeout(
+      () => {
+        if (index + 1 < slides.length) setIndex(index + 1)
+        else finishRef.current?.()
+      },
+      Math.max(0, started.at + durationMs - Date.now())
+    )
 
     return () => clearTimeout(timer)
-  }, [auto, index, current, slides.length, deck.canvas.height, deck.smarts])
+  }, [auto, generation, index, currentId, isScroll, durationMs, slides.length])
 
   /**
    * 그릴 장이 하나도 없으면 **끝난 것으로 알린다.**

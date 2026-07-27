@@ -3,7 +3,7 @@ import { creditSnapshot } from './credit'
 import { defaultDeck, emptyDeck, type Deck } from '@shared/deck'
 import { loadCurrentDeck, saveCurrentDeck } from './preset-store'
 import { sampleCreditData } from '@shared/sample'
-import type { OverlayState } from '@shared/overlay'
+import { OVERLAY_PING_MS, type OverlayState } from '@shared/overlay'
 
 /**
  * OBS 오버레이와 앱 사이의 단방향 채널.
@@ -82,14 +82,20 @@ export function addOverlayClient(res: Response): void {
   clients.add(res)
   res.write(`event: state\ndata: ${JSON.stringify(state())}\n\n`)
 
-  // 유휴 연결이 중간 장비에서 끊기지 않도록 주기적으로 주석 프레임을 보낸다
+  /*
+   * 유휴 연결이 중간 장비에서 끊기지 않게 하고, 동시에 **앱이 살아 있음을 알린다.**
+   *
+   * 주석(`: ping`)이 아니라 이름 붙은 이벤트라야 오버레이가 받을 수 있다. 오버레이는
+   * 이게 한동안 안 오면 화면을 비운다 — 앱이 죽었는데 마지막 장이 방송에 박혀 있으면
+   * 안 되기 때문이다.
+   */
   const ping = setInterval(() => {
     try {
-      res.write(': ping\n\n')
+      res.write('event: ping\ndata: 1\n\n')
     } catch {
       /* 아래 close 에서 정리된다 */
     }
-  }, 25_000)
+  }, OVERLAY_PING_MS)
 
   res.on('close', () => {
     clearInterval(ping)

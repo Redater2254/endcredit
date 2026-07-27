@@ -35,7 +35,17 @@ export function startSession(): SessionStats {
   const dir = sessionDir(sessionId)
   mkdirSync(dir, { recursive: true })
 
-  stream = createWriteStream(join(dir, 'events.ndjson'), { flags: 'a' })
+  const out = createWriteStream(join(dir, 'events.ndjson'), { flags: 'a' })
+  /*
+   * 리스너가 없으면 'error' 가 **미처리 예외가 되어 앱이 통째로 죽는다.**
+   * 디스크가 꽉 차거나 권한이 막혀도 수집과 집계는 계속돼야 한다 — 원본 기록만 포기한다.
+   * (집계는 메모리에 따로 쌓이므로 오늘 크레딧은 그대로 나간다. 재집계만 못 하게 된다)
+   */
+  out.on('error', (err) => {
+    console.error('[session] 이벤트 기록을 멈춥니다 — 재집계는 못 하지만 수집은 계속됩니다:', err)
+    if (stream === out) stream = null
+  })
+  stream = out
   stats = { sessionId, startedAt, counts: {}, total: 0, gaps: [] }
   gapStart = null
 

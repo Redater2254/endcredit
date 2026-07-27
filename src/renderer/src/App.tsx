@@ -152,8 +152,31 @@ export default function App(): React.JSX.Element {
     const offCredit = window.endcredit.credit.onChange((data) =>
       setOverlay((prev) => (prev && !prev.sample ? { ...prev, data } : prev))
     )
-    // OBS 접속 개수는 알림이 없으므로 가볍게 폴링한다
-    const timer = setInterval(() => window.endcredit.overlay.state().then(setOverlay), 3000)
+    /*
+     * OBS 접속 개수는 알림이 없으므로 가볍게 폴링한다.
+     *
+     * **여기서 덱을 갈아끼우면 안 된다.** IPC 로 온 값은 매번 새 객체라, 재생 중이면
+     * 그때마다 장 넘김 타이머가 처음부터 다시 시작한다 — 이 문서는 모든 장이 3초를
+     * 넘으므로 **첫 장에서 영영 못 나갔다.** 필요한 건 숫자 하나뿐이다.
+     * 재생 상태가 어긋난 경우(알림을 놓쳤을 때)에만 통째로 받아들인다.
+     */
+    const timer = setInterval(
+      () =>
+        window.endcredit.overlay.state().then((s) =>
+          setOverlay((prev) => {
+            if (!prev) return s
+            if (
+              prev.playing !== s.playing ||
+              prev.generation !== s.generation ||
+              prev.sample !== s.sample
+            ) {
+              return s
+            }
+            return prev.clients === s.clients ? prev : { ...prev, clients: s.clients }
+          })
+        ),
+      3000
+    )
     return () => {
       off()
       offCredit()

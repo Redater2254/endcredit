@@ -99,10 +99,18 @@ export function DeckMenu({
                 <span
                   className="dm-name"
                   onClick={async () => {
-                    const d = await window.endcredit.presets.load(p.file)
-                    onLoaded(d)
-                    setOpen(false)
-                    flash(`'${p.name}' 불러옴`)
+                    try {
+                      const d = await window.endcredit.presets.load(p.file)
+                      onLoaded(d)
+                      setOpen(false)
+                      flash(`'${p.name}' 불러옴`)
+                    } catch (err) {
+                      // 못 읽는 파일이면 이유를 보여준다. 아무 일도 안 일어나는 게 제일 나쁘다
+                      alert(
+                        `'${p.name}' 을 불러오지 못했습니다: ` +
+                          `${err instanceof Error ? err.message : String(err)}`
+                      )
+                    }
                   }}
                 >
                   {p.name}

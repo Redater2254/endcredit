@@ -6,8 +6,8 @@ import {
   readdirSync,
   statSync,
   unlinkSync,
-  writeFileSync
 } from 'node:fs'
+import { writeFileAtomic } from './safe-write'
 import { basename, extname, join } from 'node:path'
 import { app, dialog } from 'electron'
 import { SERVER_PORT } from '@shared/constants'
@@ -74,7 +74,7 @@ export function storeAssetBytes(preferredName: string, data: Buffer): Asset {
     return { file: preferredName, url: urlFor(preferredName), sizeBytes: data.length }
   }
   const file = uniqueName(preferredName)
-  writeFileSync(join(assetsDir(), file), data)
+  writeFileAtomic(join(assetsDir(), file), data)
   return { file, url: urlFor(file), sizeBytes: data.length }
 }
 

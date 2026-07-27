@@ -370,8 +370,10 @@ export function customFrames(fx: CustomEffect): string {
    * 느낌의 정체가 이것이다. 매끄러운 곡선을 그린 뒤 끊는 게 아니라, 아예 띄엄띄엄 굽는다.
    */
   const posterized = f.posterize > 0
+  // 상한이 없으면 프리셋 하나로 앱과 OBS 오버레이가 같이 얼어붙는다.
+  // 슬라이더 최대(30칸/초)로 600 에 닿으려면 20초짜리 효과여야 하니 실사용은 자르지 않는다.
   const chunks = posterized
-    ? Math.max(2, Math.round((f.posterize * fx.durationMs) / 1000))
+    ? Math.min(600, Math.max(2, Math.round((f.posterize * fx.durationMs) / 1000)))
     : 60
 
   const times: number[] = []

@@ -215,19 +215,23 @@ function stripSmartFlags(slide: Slide): Slide {
   return { ...slide, groups }
 }
 
-/** 저장 파일이 어떤 버전이든 v2 Deck 으로 만들어 돌려준다. */
+/**
+ * 저장 파일이 어떤 버전이든 v2 Deck 으로 만들어 돌려준다.
+ *
+ * **못 읽으면 던진다.** 예전에는 조용히 `defaultDeck()` 을 돌려줬는데, 그러면 부르는
+ * 쪽은 "빈 문서를 열었다"고 믿고 그대로 진행하고 **다음 저장이 원본을 덮어쓴다.**
+ * 파일이 반쪽으로 남았거나 미래 버전(v3)을 열었을 때 작업물이 통째로 사라지는 길이었다.
+ * 읽을 수 없다는 사실은 부르는 쪽이 알아야 원본을 지킬 수 있다.
+ */
 export function toDeck(raw: unknown): Deck {
-  if (!raw || typeof raw !== 'object') return defaultDeck()
+  if (!raw || typeof raw !== 'object') throw new Error('문서 형식이 아닙니다.')
   const v = (raw as { version?: number }).version
 
   if (v === 2) return normalizeV2(raw as Deck)
-  if (v === 1) {
-    try {
-      return migrateV1(raw as PresetV1)
-    } catch (err) {
-      console.warn('[migrate] v1 → v2 변환 실패, 기본 문서를 씁니다:', err)
-      return defaultDeck()
-    }
-  }
-  return defaultDeck()
+  if (v === 1) return migrateV1(raw as PresetV1)
+
+  throw new Error(
+    `알 수 없는 문서 버전입니다 (version: ${JSON.stringify(v)}). ` +
+      '더 새 버전의 endcredit 에서 만든 파일일 수 있습니다.'
+  )
 }
