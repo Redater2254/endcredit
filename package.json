@@ -1,6 +1,6 @@
 {
   "name": "endcredit",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "SOOP 스트리머용 커스텀 엔딩크레딧 제작·송출 앱",
   "main": "./out/main/index.js",
   "author": {
