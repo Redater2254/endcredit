@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, shell, Tray } from 'electron'
 import { appIcon } from './app-icon'
+import { autoStartState, setAutoStart, startedHidden } from './autostart'
 import { getSettings, patchSettings } from './settings'
 import { getUiScaleSetting, resolveUiScale, setUiScale, watchUiScale, type UiScale } from './ui-scale'
 import { SERVER_PORT } from './config'
@@ -17,6 +18,7 @@ import {
   getCollectorStatus,
   onCollectorChange,
   onCollectorEvent,
+  onNewSession,
   registerCollectorIpc,
   startCollecting,
   stopCollecting
@@ -60,7 +62,7 @@ import {
   stopOverlay,
   togglePlay
 } from './overlay'
-import type { AuthState, ServerStatus } from '@shared/types'
+import type { AutoStartState, AuthState, ServerStatus } from '@shared/types'
 import type { CreditData } from '@shared/aggregate'
 import type { Deck } from '@shared/deck'
 
@@ -124,8 +126,14 @@ function createWindow(): void {
 
   // 편집 화면이 넓어야 쓸 만하다 — 처음부터 최대화해서 띄운다
   mainWindow.on('ready-to-show', () => {
+    /*
+     * `maximize()` 는 **숨은 창도 띄운다**(Electron 문서에 있는 동작). 자동 실행으로 켠
+     * 아침마다 창이 번쩍이면 안 되므로, 같은 틱 안에서 다시 감춘다 — 화면에 한 번도
+     * 그려지지 않는다. 그래도 최대화는 걸어둔 채라 나중에 열면 바로 넓게 뜬다.
+     */
     mainWindow?.maximize()
-    if (!process.argv.includes('--hidden')) mainWindow?.show()
+    if (startedHidden()) mainWindow?.hide()
+    else mainWindow?.show()
   })
 
   /**
@@ -186,9 +194,25 @@ function hintOnce(): void {
   })
 }
 
+/** 자동 실행 설정은 트레이와 앱 화면 두 곳에서 바꾼다 — 바뀌면 창 쪽도 따라가야 한다 */
+function pushAutoStart(s: AutoStartState): void {
+  mainWindow?.webContents.send('app:autostart', s)
+}
+
+/** 창이 닫혀 있어도 알려야 한다. 트레이에서 켰는데 조용히 안 걸리면 알 길이 없다 */
+function notifyAutoStartFailed(reason?: string): void {
+  console.warn('[autostart] 등록되지 않았습니다:', reason)
+  tray?.displayBalloon({
+    icon: appIcon(64),
+    title: '자동 실행을 켜지 못했습니다',
+    content: reason ?? '윈도우가 시작 프로그램 등록을 받지 않았습니다.'
+  })
+}
+
 function buildTrayMenu(): void {
   if (!tray) return
   const playing = isPlaying()
+  const auto = autoStartState()
   const keys = hotkeyState
     .filter((h) => h.registered)
     .map((h) => `${h.accelerator.replace('CommandOrControl', 'Ctrl')} · ${h.label}`)
@@ -208,10 +232,14 @@ function buildTrayMenu(): void {
       {
         label: '윈도우 시작 시 자동 실행',
         type: 'checkbox' as const,
-        checked: app.getLoginItemSettings().openAtLogin,
+        // 기억해 둔 값이 아니라 **OS 에 물어본 사실**을 보여준다
+        checked: auto.enabled,
+        enabled: auto.available,
         click: (item) => {
-          // 로그인하자마자 트레이에 들어가 있게 — 창을 띄우면 성가시다
-          app.setLoginItemSettings({ openAtLogin: item.checked, args: ['--hidden'] })
+          const next = setAutoStart(item.checked)
+          // 못 걸렸으면 체크를 되돌린다 — 켜졌다고 보이는데 안 뜨는 게 제일 나쁘다
+          if (next.enabled !== item.checked) notifyAutoStartFailed(next.reason)
+          pushAutoStart(next)
           buildTrayMenu()
         }
       },
@@ -306,6 +334,15 @@ app.whenReady().then(async () => {
   onCollectorChange((status, stats) => {
     mainWindow?.webContents.send('collector:status', status, stats)
   })
+  /*
+   * 방송이 끝나 세션이 닫힌 뒤 **새 방송이 시작됐다.** 집계를 비우지 않으면 어제 채팅이
+   * 오늘 크레딧에 그대로 남는다. 창과 OBS 양쪽에 새 집계를 곧바로 알린다.
+   */
+  onNewSession(() => {
+    resetCredit()
+    mainWindow?.webContents.send('credit:changed', creditSnapshot())
+    notifyDataChanged()
+  })
   onCollectorEvent((event) => {
     pushCredit(event)
     mainWindow?.webContents.send('collector:tap', event)
@@ -377,6 +414,29 @@ app.whenReady().then(async () => {
     overlayUrl: `http://localhost:${SERVER_PORT}/overlay`,
     hotkeys: hotkeyState
   }))
+  /**
+   * 윈도우 시작 시 자동 실행.
+   *
+   * 트레이 메뉴에도 같은 스위치가 있지만 둘 다 **OS 에서 읽어오므로** 어긋날 수 없다.
+   * 여기서 바꾸면 트레이 메뉴도 다시 그린다.
+   */
+  /**
+   * 앱이 켜지면 수집도 자동으로 시작.
+   *
+   * 자동 실행과 짝이다 — 앱만 떠 있고 수집을 안 누르면 그날 채팅은 그대로 사라진다.
+   * 방송이 없으면 수집기가 `방송 대기` 로 8초마다 다시 보므로 미리 켜 둬도 괜찮다.
+   */
+  ipcMain.handle('app:autocollect-get', () => Boolean(getSettings().autoCollect))
+  ipcMain.handle('app:autocollect-set', (_e, on: boolean) => {
+    patchSettings({ autoCollect: Boolean(on) })
+    return Boolean(getSettings().autoCollect)
+  })
+  ipcMain.handle('app:autostart-get', (): AutoStartState => autoStartState())
+  ipcMain.handle('app:autostart-set', (_e, on: boolean): AutoStartState => {
+    const next = setAutoStart(Boolean(on))
+    buildTrayMenu()
+    return next
+  })
   ipcMain.handle('app:open-url', (_e, url: string) => {
     // 앱 창 안에서 열리면 돌아올 길이 없다 — 기본 브라우저로 보낸다
     if (/^https?:\/\//.test(url)) return shell.openExternal(url)
@@ -437,11 +497,8 @@ app.whenReady().then(async () => {
     console.error('[server]', serverStatus.error)
   }
 
-  // 자동 실행으로 켜졌으면 창 없이 트레이에서 시작한다
+  // 자동 실행(--hidden)으로 켜졌으면 창 없이 트레이에서 시작한다 — ready-to-show 가 처리한다
   createWindow()
-  if (process.argv.includes('--hidden')) {
-    mainWindow?.once('ready-to-show', () => mainWindow?.hide())
-  }
 
   hotkeyState = HOTKEYS.map((h) => {
     // 다른 프로그램이 이미 쓰고 있으면 등록에 실패한다 — 조용히 넘기지 않고 UI 에 알린다
@@ -462,6 +519,21 @@ app.whenReady().then(async () => {
 
   await restoreSession()
   push(getAuthState())
+
+  /*
+   * 자동 수집. **로그인이 살아 있을 때만** 시작한다 — 토큰이 만료돼 있으면 수집기가
+   * 곧바로 인증 실패로 떨어지고, 그 오류를 아무도 안 보고 있게 된다(창이 트레이에 있다).
+   * 그때는 조용히 넘기고 사용자가 창을 열었을 때 평소처럼 로그인하게 둔다.
+   */
+  if (getSettings().autoCollect) {
+    if (getAuthState().status === 'logged-in') {
+      console.log('[collector] 자동 수집을 시작합니다')
+      resetCredit()
+      startCollecting()
+    } else {
+      console.warn('[collector] 자동 수집을 건너뜁니다 — 로그인되어 있지 않습니다')
+    }
+  }
 
   /*
    * 새 버전 확인은 **켠 직후를 피해서** 한 번만 한다.

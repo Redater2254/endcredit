@@ -615,6 +615,33 @@ pre {
   margin: 0;
 }
 
+/* 켜는 것이 **바람직한** 스위치. 기본 .toggle 은 켜지면 주황(경고)이라 뜻이 반대가 된다 */
+.toggle.good.on {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 50%, transparent);
+  background: color-mix(in srgb, var(--ok) 8%, transparent);
+}
+.toggle.good input {
+  accent-color: var(--ok);
+}
+.toggle:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 수집 버튼 아래 한 줄 — 스위치와 그 뜻을 붙여 둔다 */
+.autostart {
+  margin: 0 0 1rem;
+}
+.autostart em {
+  display: block;
+  margin-top: 0.45rem;
+  font-style: normal;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--dim);
+}
+
 .warn-box {
   margin: 0.9rem 0 0;
   background: rgba(245, 166, 35, 0.08);

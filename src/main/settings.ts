@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import { writeFileAtomic } from './safe-write'
 import { dirname, join } from 'node:path'
 import { app } from 'electron'
@@ -12,6 +12,13 @@ import { app } from 'electron'
 export interface Settings {
   /** 창을 닫으면 트레이로 내려간다는 안내를 이미 보여줬는지 */
   trayHintShown?: boolean
+  /**
+   * 앱이 켜지면 수집도 자동으로 시작할지.
+   *
+   * **이 컴퓨터의 습관**이지 문서의 일부가 아니다 — 프리셋을 남에게 주면서 그 사람
+   * 컴퓨터까지 채팅을 모으게 만들면 안 된다.
+   */
+  autoCollect?: boolean
   /**
    * 파일 창을 마지막으로 열었던 폴더. **종류별로 따로** 기억한다.
    * 하나로 합치면 소리를 넣은 뒤 이미지를 고르려는데 음악 폴더가 열린다.
@@ -46,9 +53,30 @@ let cache: Settings | null = null
 
 export function getSettings(): Settings {
   if (cache) return cache
+  const p = path()
+  if (!existsSync(p)) {
+    cache = {}
+    return cache
+  }
   try {
-    cache = existsSync(path()) ? (JSON.parse(readFileSync(path(), 'utf8')) as Settings) : {}
-  } catch {
+    /*
+     * **BOM 을 떼고 읽는다.** 사람이 메모장이나 PowerShell 로 이 파일을 한 번 고치면
+     * 앞에 `﻿` 가 붙고, 그러면 `JSON.parse` 가 그 자리에서 터진다.
+     * 내용은 멀쩡한데 설정이 통째로 초기화되는 셈이라 원인을 찾을 수가 없다.
+     */
+    cache = JSON.parse(readFileSync(p, 'utf8').replace(/^﻿/, '')) as Settings
+  } catch (err) {
+    /*
+     * 못 읽은 파일을 그 자리에 두면 **다음 저장이 원본을 덮어써 영영 사라진다.**
+     * 옆으로 치워두면 나중에 손으로 되살릴 수 있다. (프리셋 쪽과 같은 규칙)
+     */
+    const kept = `${p}.broken-${Date.now()}`
+    try {
+      renameSync(p, kept)
+      console.warn(`[settings] 설정을 읽지 못해 ${kept} 로 옮기고 기본값으로 시작합니다:`, err)
+    } catch (mvErr) {
+      console.error('[settings] 손상된 설정을 옮기지도 못했습니다 — 저장이 덮어쓸 수 있습니다:', mvErr)
+    }
     cache = {}
   }
   return cache

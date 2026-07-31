@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AuthState, ServerStatus } from '@shared/types'
+import type { AutoStartState, AuthState, ServerStatus } from '@shared/types'
 import type { CollectorStatus, RawEvent, SessionStats } from '@shared/events'
 import type { CreditData, RankedUser } from '@shared/aggregate'
 import { DeckRenderer } from '@shared/DeckRenderer'
@@ -287,6 +287,8 @@ function CollectorCard({ loggedIn }: { loggedIn: boolean }): React.JSX.Element {
         )}
       </div>
 
+      <AutoStartRow />
+
       {!loggedIn && <p className="mono">먼저 SOOP 계정으로 로그인하세요.</p>}
 
       {status.state === 'error' && <div className="err-box">{status.message}</div>}
@@ -334,6 +336,87 @@ function CollectorCard({ loggedIn }: { loggedIn: boolean }): React.JSX.Element {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * 컴퓨터를 켤 때 endcredit 을 함께 띄운다.
+ *
+ * 원래 **트레이 아이콘 우클릭 메뉴에만** 있었다 — 그래서 아무도 못 찾았다. 앱이 꺼져
+ * 있으면 수집을 켤 수조차 없고, 그 사실을 방송이 끝난 뒤에야 알게 된다(그날 채팅은
+ * 이미 사라진 뒤다). 그러니 자리는 수집 버튼 바로 아래다.
+ *
+ * 값은 기억해 두지 않고 **매번 윈도우에 물어본다.** 작업 관리자 › 시작 프로그램에서
+ * 꺼도 여기가 곧바로 따라가야 하기 때문이다.
+ */
+function AutoStartRow(): React.JSX.Element {
+  const [s, setS] = useState<AutoStartState | null>(null)
+
+  useEffect(() => {
+    window.endcredit.app.autoStart.get().then(setS)
+    // 트레이 메뉴에도 같은 스위치가 있다 — 거기서 바꿔도 여기가 따라간다
+    return window.endcredit.app.autoStart.onChange(setS)
+  }, [])
+
+  if (!s) return <></>
+
+  return (
+    <div className="autostart">
+      <label className={`toggle good ${s.enabled ? 'on' : ''}`}>
+        <input
+          type="checkbox"
+          checked={s.enabled}
+          disabled={!s.available}
+          onChange={(e) => window.endcredit.app.autoStart.set(e.target.checked).then(setS)}
+        />
+        컴퓨터를 켤 때 자동으로 실행
+      </label>
+      <em>
+        {!s.available
+          ? s.reason
+          : s.enabled
+            ? '창 없이 트레이(작업 표시줄 오른쪽 ∧)에서 조용히 시작합니다.'
+            : '꺼 두면 방송하는 날 앱을 직접 켜야 합니다 — 잊으면 그날 채팅이 남지 않습니다.'}
+      </em>
+      {s.available && s.reason && <p className="warn-box">{s.reason}</p>}
+
+      <AutoCollectRow />
+    </div>
+  )
+}
+
+/**
+ * 앱이 켜지면 수집도 자동으로 시작.
+ *
+ * 자동 실행만으로는 반쪽이다 — 앱이 트레이에 떠 있어도 `수집 시작` 을 안 누르면 그날
+ * 채팅은 그대로 사라진다. 방송이 아직 없으면 수집기가 `방송 대기` 로 기다리다 붙으므로
+ * 미리 켜 두는 편이 안전하다.
+ */
+function AutoCollectRow(): React.JSX.Element {
+  const [on, setOn] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    window.endcredit.app.autoCollect.get().then(setOn)
+  }, [])
+
+  if (on === null) return <></>
+
+  return (
+    <>
+      <label className={`toggle good ${on ? 'on' : ''}`} style={{ marginTop: '0.6rem' }}>
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => window.endcredit.app.autoCollect.set(e.target.checked).then(setOn)}
+        />
+        앱이 켜지면 수집도 자동으로 시작
+      </label>
+      <em>
+        {on
+          ? '방송이 아직 없으면 기다렸다가, 방송이 시작되면 알아서 모읍니다. 방송이 끝나고 20분이 지나면 세션을 닫아 다음 방송과 섞이지 않게 합니다.'
+          : '로그인이 풀려 있으면 건너뜁니다.'}
+      </em>
+    </>
   )
 }
 
@@ -608,7 +691,10 @@ function statusLabel(status: CollectorStatus): string {
     case 'live':
       return '수집 중 — 방송 내내 이 앱을 켜두세요'
     case 'waiting-broadcast':
-      return '인증 완료 · 방송 시작을 기다리는 중 (켜면 자동 연결)'
+      // 세션을 닫았다는 건 **다음 방송은 새 집계로 시작한다**는 뜻이다. 반드시 알려야 한다
+      return status.closedSessionId
+        ? `방송이 끝난 것으로 보고 세션 ${status.closedSessionId} 을 닫았습니다 · 다음 방송은 새로 모읍니다`
+        : '인증 완료 · 방송 시작을 기다리는 중 (켜면 자동 연결)'
     case 'reconnecting':
       return `연결 끊김 · ${Math.round(status.nextRetryMs / 1000)}초 후 재시도 (${status.attempt}회차)`
     case 'stopped':

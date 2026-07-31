@@ -29,6 +29,20 @@ export interface StationInfo {
   raw: unknown
 }
 
+/**
+ * 윈도우 시작 시 자동 실행.
+ *
+ * `enabled` 는 **OS 에서 읽어온 사실**이지 우리가 기억해 둔 값이 아니다. 사용자가
+ * 작업 관리자 › 시작 프로그램에서 꺼도 화면이 바로 따라가야 한다.
+ */
+export interface AutoStartState {
+  enabled: boolean
+  /** 이 실행 파일에서 켤 수 있는가 (개발 모드·다른 OS 에서는 못 켠다) */
+  available: boolean
+  /** 못 켜거나 켜지 못한 이유. 있으면 그대로 보여준다 */
+  reason?: string
+}
+
 export interface ServerStatus {
   port: number
   listening: boolean

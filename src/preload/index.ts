@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { AuthState, ServerStatus, UpdateState } from '@shared/types'
+import type { AutoStartState, AuthState, ServerStatus, UpdateState } from '@shared/types'
 import type { CollectorStatus, RawEvent, SessionStats } from '@shared/events'
 import type { CreditData } from '@shared/aggregate'
 import type { Deck } from '@shared/deck'
@@ -121,7 +121,26 @@ const api = {
       hotkeys: { accelerator: string; label: string; registered: boolean }[]
     }> => ipcRenderer.invoke('app:info'),
     /** 기본 브라우저로 연다 (소리 받는 사이트 등) */
-    openUrl: (url: string): Promise<void> => ipcRenderer.invoke('app:open-url', url)
+    openUrl: (url: string): Promise<void> => ipcRenderer.invoke('app:open-url', url),
+    /**
+     * 윈도우 시작 시 자동 실행. `set` 은 **실제로 걸린 결과**를 돌려준다 —
+     * 조용히 실패할 수 있어서 보낸 값을 그대로 믿으면 안 된다.
+     */
+    autoStart: {
+      get: (): Promise<AutoStartState> => ipcRenderer.invoke('app:autostart-get'),
+      set: (on: boolean): Promise<AutoStartState> => ipcRenderer.invoke('app:autostart-set', on),
+      /** 트레이 메뉴에서 바꿨을 때도 화면이 따라가야 한다 */
+      onChange: (fn: (s: AutoStartState) => void): (() => void) => {
+        const handler = (_e: unknown, s: AutoStartState): void => fn(s)
+        ipcRenderer.on('app:autostart', handler)
+        return () => ipcRenderer.off('app:autostart', handler)
+      }
+    },
+    /** 앱이 켜지면 수집도 자동으로 시작할지 (이 컴퓨터에만 저장된다) */
+    autoCollect: {
+      get: (): Promise<boolean> => ipcRenderer.invoke('app:autocollect-get'),
+      set: (on: boolean): Promise<boolean> => ipcRenderer.invoke('app:autocollect-set', on)
+    }
   },
   /**
    * 효과 편집기 창.

@@ -105,7 +105,15 @@ export type CollectorStatus =
   | { state: 'connecting' }
   | { state: 'live'; sessionId: string; since: number }
   /** 인증은 통과했지만 아직 방송이 안 켜진 상태. 켜지면 자동으로 붙는다. */
-  | { state: 'waiting-broadcast'; since: number }
+  | {
+      state: 'waiting-broadcast'
+      since: number
+      /**
+       * 방송이 끝난 것으로 보고 닫은 세션. 다음 방송은 **새 세션**으로 모은다 —
+       * 없으면 어제 채팅과 오늘 채팅이 한 크레딧에 섞인다.
+       */
+      closedSessionId?: string
+    }
   | { state: 'reconnecting'; attempt: number; nextRetryMs: number }
   | { state: 'stopped'; sessionId: string | null }
   | { state: 'error'; message: string }
